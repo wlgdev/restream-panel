@@ -1,0 +1,32 @@
+{
+  "name": "restream-panel",
+  "module": "src/main.ts",
+  "type": "module",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "bun run --hot src/main.ts",
+    "start": "bun run src/main.ts",
+    "build:windows": "bun run scripts/build.ts --target=windows",
+    "build:linux": "bun run scripts/build.ts --target=linux",
+    "build:frontend": "bun build src/web/main.tsx --outdir public --minify",
+    "build:prod": "bun run scripts/build.ts",
+    "test": "bun test",
+    "test:watch": "bun test --watch"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@elysiajs/html": "^1.4.0",
+    "@elysiajs/static": "^1.4.7",
+    "elysia": "^1.4.25",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  }
+}

@@ -1,0 +1,58 @@
+name: SSH Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump-type:
+        type: choice
+        description: "Select the version bump type"
+        required: true
+        default: "patch"
+        options: ["patch", "minor", "major"]
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest 
+
+    steps:
+      - name: Echo Bump Type
+        run: echo ${{ inputs.bump-type }}
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Bump
+        run: |
+          bunx npm version  ${{ inputs.bump-type }} --no-git-tag-version
+          echo VERSION=$(bunx npm pkg get version | tr -d '"') >> $GITHUB_ENV
+
+      - name: Commit version bump
+        run: |
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git add .
+          git commit -m "Bump version to ${{ env.VERSION }}"
+          git push origin ${{ github.ref_name }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --cpu=arm64 --os=linux
+
+      - name: Build
+        run: |
+          bun build:frontend
+          bun build:linux --define VERSION='"${{ env.VERSION }}"'
+
+      - name: Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: ${{ env.VERSION }}
+          tag_name: ${{ env.VERSION }}
+          generate_release_notes: true
+          draft: false
+          files: restream-panel
