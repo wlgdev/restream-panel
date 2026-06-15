@@ -58,4 +58,4 @@ jobs:
           tag_name: ${{ env.VERSION }}
           generate_release_notes: true
           draft: false
-          files: /dist/restream-panel
+          files: dist/restream-panel
