@@ -7,7 +7,6 @@ const PUBLIC_DIR = "./public";
 const EMBEDDED_FILE = "./src/embedded.ts";
 
 async function build() {
-  // 1. Парсим аргументы переданные из package.json (в т.ч. --define)
   const { values } = parseArgs({
     args: process.argv.slice(2),
     options: {
@@ -20,14 +19,11 @@ async function build() {
   const forceWin = values.target === "windows";
   const forceLinux = values.target === "linux";
 
-  // 2. Формируем массив флагов для прокидывания дальше в bun build
-  // Если пришло VERSION="0.0.0", превратится в ["--define", "VERSION=\"0.0.0\""]
   const defineFlags = (values.define || []).flatMap((def) => ["--define", def]);
 
   console.log("🔨 Building Restream Panel...\n");
 
   console.log("1. Building frontend...");
-  // Передаем флаги в сборку фронтенда
   await $`bun build src/web/main.tsx --outdir ${PUBLIC_DIR} --minify ${defineFlags}`;
 
   console.log("\n2. Embedding static assets...");
@@ -61,7 +57,6 @@ export const EMBEDDED_JS = ${JSON.stringify(js)};
   await mkdir(DIST_DIR, { recursive: true });
 
   console.log(`   Target: ${target}`);
-  // Передаем флаги в компиляцию бинарника
   await $`bun build src/main.ts --compile --target=${target} --outfile ${outfile} ${defineFlags}`;
 
   console.log(`\n✅ Build complete! Binary: ${outfile}`);
