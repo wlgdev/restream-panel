@@ -385,6 +385,66 @@ ESTAB             0                   10000                            194.5.78.
 });
 
 describe("StreamMonitor event generation", () => {
+  test("should keep tiny inbound scanner connections out of snapshots and logs", async () => {
+    let currentOutput = `State             Recv-Q              Send-Q                          Local Address:Port                              Peer Address:Port              Process
+ESTAB             0                   0                                194.5.78.216:1935                            203.0.113.10:5030               users:(("nginx",pid=455527,fd=4))
+         sack cubic wscale:8,7 rto:205 rtt:4.266/0.429 ato:40 mss:1460 pmtu:1500 rcvmss:1460 advmss:1460 cwnd:10 bytes_sent:0 bytes_acked:0 bytes_received:128 segs_out:1 segs_in:2 data_segs_out:0 data_segs_in:1 send 27379278bps lastsnd:11503 lastrcv:2 lastack:2 pacing_rate 54748928bps delivery_rate 2966720bps delivered:0 app_limited busy:26ms rcv_rtt:4.801 rcv_space:187009 rcv_ssthresh:1359123 minrtt:3.937 snd_wnd:65024
+`;
+
+    const monitor = new StreamMonitor({
+      commandExecutor: () => ({
+        success: true,
+        stdout: currentOutput,
+        stderr: "",
+      }),
+    });
+
+    const first = await monitor.collectOnce();
+
+    expect(first.data).toEqual([]);
+    expect(first.streams).toEqual([]);
+    expect(monitor.getEventsSince()).toEqual([]);
+
+    currentOutput = "";
+    const second = await monitor.collectOnce();
+
+    expect(second.data).toEqual([]);
+    expect(second.streams).toEqual([]);
+    expect(monitor.getEventsSince()).toEqual([]);
+  });
+
+  test("should promote inbound connections after enough payload bytes arrive", async () => {
+    let currentOutput = `State             Recv-Q              Send-Q                          Local Address:Port                              Peer Address:Port              Process
+ESTAB             0                   0                                194.5.78.216:1935                            109.63.168.164:5030               users:(("nginx",pid=455527,fd=4))
+         sack cubic wscale:8,7 rto:205 rtt:4.266/0.429 ato:40 mss:1460 pmtu:1500 rcvmss:1460 advmss:1460 cwnd:10 bytes_sent:0 bytes_acked:0 bytes_received:512 segs_out:1 segs_in:2 data_segs_out:0 data_segs_in:1 send 27379278bps lastsnd:11503 lastrcv:2 lastack:2 pacing_rate 54748928bps delivery_rate 2966720bps delivered:0 app_limited busy:26ms rcv_rtt:4.801 rcv_space:187009 rcv_ssthresh:1359123 minrtt:3.937 snd_wnd:65024
+`;
+
+    const monitor = new StreamMonitor({
+      commandExecutor: () => ({
+        success: true,
+        stdout: currentOutput,
+        stderr: "",
+      }),
+    });
+
+    const pending = await monitor.collectOnce();
+    expect(pending.data).toEqual([]);
+    expect(monitor.getEventsSince()).toEqual([]);
+
+    currentOutput = `State             Recv-Q              Send-Q                          Local Address:Port                              Peer Address:Port              Process
+ESTAB             0                   0                                194.5.78.216:1935                            109.63.168.164:5030               users:(("nginx",pid=455527,fd=4))
+         sack cubic wscale:8,7 rto:205 rtt:4.266/0.429 ato:40 mss:1460 pmtu:1500 rcvmss:1460 advmss:1460 cwnd:10 bytes_sent:3482 bytes_acked:3482 bytes_received:11287860 segs_out:3566 segs_in:5036 data_segs_out:8 data_segs_in:5026 send 27379278bps lastsnd:11503 lastrcv:2 lastack:2 pacing_rate 54748928bps delivery_rate 2966720bps delivered:9 app_limited busy:26ms rcv_rtt:4.801 rcv_space:187009 rcv_ssthresh:1359123 minrtt:3.937 rcv_ooopack:12 snd_wnd:65024
+`;
+
+    const confirmed = await monitor.collectOnce();
+    const events = monitor.getEventsSince();
+
+    expect(confirmed.data).toHaveLength(1);
+    expect(confirmed.streams).toHaveLength(1);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("stream_start");
+  });
+
   test("should emit stream_start and target_connected events", async () => {
     let now = 1_000_000;
     const monitor = new StreamMonitor({

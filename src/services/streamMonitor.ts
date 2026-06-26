@@ -100,6 +100,9 @@ interface ActiveStreamState {
 export class StreamMonitor {
   private static readonly RATE_WINDOW_SAMPLE_COUNT = 4;
   private static readonly ASSOCIATION_WINDOW_MS = 10_000;
+  private static readonly INBOUND_CONFIRM_MIN_BYTES = 4096;
+  private static readonly INBOUND_CONFIRM_MIN_AGE_WINDOW_MULTIPLIER = 1.5;
+  private static readonly INBOUND_CONFIRM_MIN_RX_BPS = 16_000;
   private readonly processStreamIdCache = new Map<number, string | null>();
   private readonly states = new Map<string, PreviousState>();
   private readonly throughputSamples = new Map<string, ThroughputSample[]>();
@@ -283,9 +286,10 @@ export class StreamMonitor {
       const data = this.parse(commandResult.stdout);
       await this.resolveRtmpTargets(data);
       this.assignStreams(data);
-      const streams = this.buildLogicalStreams(data);
+      const visibleData = this.filterVisibleMetrics(data);
+      const streams = this.buildLogicalStreams(visibleData);
 
-      for (const metric of data) {
+      for (const metric of visibleData) {
         if (metric.target !== "INBOUND" && metric.stream_id && metric.health < 90 && !metric.is_first_tick) {
           this.eventLog.push({
             timestamp: timestamp,
@@ -312,7 +316,7 @@ export class StreamMonitor {
 
       this.lastSnapshot = {
         success: true,
-        data,
+        data: visibleData,
         streams,
         timestamp,
       };
@@ -466,7 +470,9 @@ export class StreamMonitor {
       if (!this.firstSeen.has(key)) {
         this.firstSeen.set(key, now);
         if (metric.target === "INBOUND") {
-          newInbounds.push({ key, metric });
+          if (this.isConfirmedInbound(metric, now)) {
+            newInbounds.push({ key, metric });
+          }
         } else if (!metric.stream_id) {
           newOutbounds.push({ key, metric });
         } else {
@@ -479,6 +485,10 @@ export class StreamMonitor {
             peerIp: metric.peer_ip,
           });
         }
+      } else if (metric.target === "INBOUND" && !metric.stream_id && this.isConfirmedInbound(metric, now)) {
+        newInbounds.push({ key, metric });
+      } else if (metric.target !== "INBOUND" && !metric.stream_id) {
+        newOutbounds.push({ key, metric });
       }
     }
 
@@ -532,7 +542,7 @@ export class StreamMonitor {
               break;
             }
           }
-          if (hasOutbound || metric.bytes_received > 4096) {
+          if (hasOutbound || this.isConfirmedInbound(metric, now)) {
             state.loggedStart = true;
             this.eventLog.push({
               timestamp: new Date(now).toISOString(),
@@ -635,6 +645,32 @@ export class StreamMonitor {
         });
       }
     }
+  }
+
+  private filterVisibleMetrics(metrics: StreamMetrics[]): StreamMetrics[] {
+    return metrics.filter((metric) => {
+      if (metric.target !== "INBOUND" || metric.stream_id) {
+        return true;
+      }
+
+      return this.isConfirmedInbound(metric, this.now());
+    });
+  }
+
+  private isConfirmedInbound(metric: StreamMetrics, now: number): boolean {
+    if (metric.target !== "INBOUND") {
+      return true;
+    }
+
+    if (metric.bytes_received >= StreamMonitor.INBOUND_CONFIRM_MIN_BYTES) {
+      return true;
+    }
+
+    const firstSeenAt = this.firstSeen.get(this.connectionKey(metric)) ?? now;
+    const ageMs = now - firstSeenAt;
+    const minAgeMs = this.intervalMs * StreamMonitor.INBOUND_CONFIRM_MIN_AGE_WINDOW_MULTIPLIER;
+
+    return ageMs >= minAgeMs && metric.rx_bps >= StreamMonitor.INBOUND_CONFIRM_MIN_RX_BPS;
   }
 
   private buildLogicalStreams(metrics: StreamMetrics[]): LogicalStream[] {
