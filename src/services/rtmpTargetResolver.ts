@@ -1,4 +1,4 @@
-export type ResolvedRtmpTarget = "VK" | "YOUTUBE" | "UNKNOWN";
+export type ResolvedRtmpTarget = "VK" | "YOUTUBE" | "TWITCH" | "UNKNOWN";
 
 interface IpInfoResponse {
   org?: string;
@@ -85,6 +85,10 @@ export class RtmpTargetResolver {
 
     if (value.includes("vk")) {
       return "VK";
+    }
+
+    if (value.includes("twitch") || value.includes("amazon")) {
+      return "TWITCH";
     }
 
     return "UNKNOWN";
