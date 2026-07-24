@@ -41,8 +41,8 @@ describe("StreamEventLog", () => {
 
     const all = log.getSince();
     expect(all.length).toBe(1000);
-    expect(all[0].seq).toBe(6);
-    expect(all[999].seq).toBe(1005);
+    expect(all[0]?.seq).toBe(6);
+    expect(all[999]?.seq).toBe(1005);
   });
 
   test("getSince without args returns all events", () => {
@@ -61,8 +61,8 @@ describe("StreamEventLog", () => {
     
     const after1 = log.getSince(1);
     expect(after1.length).toBe(2);
-    expect(after1[0].seq).toBe(2);
-    expect(after1[1].seq).toBe(3);
+    expect(after1[0]?.seq).toBe(2);
+    expect(after1[1]?.seq).toBe(3);
 
     const after3 = log.getSince(3);
     expect(after3.length).toBe(0);

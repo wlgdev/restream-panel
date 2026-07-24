@@ -114,10 +114,14 @@ export function createApiServer(
         set.status = 401;
         return { error: "Unauthorized" };
       }
-    })
-    .use(createApplicationsRoutes(configService))
-    .use(createServersRoutes(configService))
-    .use(createSystemRoutes(nginxService, config))
+    });
+
+  if (config.enableNginxConfig) {
+    app.use(createApplicationsRoutes(configService));
+    app.use(createServersRoutes(configService));
+  }
+
+  app.use(createSystemRoutes(nginxService, config))
     .onError(({ error, code }) => {
       if (code === "NOT_FOUND") return;
 

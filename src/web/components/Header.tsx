@@ -1,7 +1,7 @@
 import React from "react";
 
 interface HeaderProps {
-  status: { running: boolean; version: string };
+  status: { enabled?: boolean; running: boolean; version: string };
   appCount: number;
   onReload: () => void;
 }
@@ -30,7 +30,9 @@ export function Header({ status, appCount, onReload }: HeaderProps) {
             <div>
               <h1>Restream Panel</h1>
               <div className="header-meta">
-                {appCount} app{appCount !== 1 ? "s" : ""} configured
+                {status.enabled === false 
+                  ? "Config management disabled"
+                  : `${appCount} app${appCount !== 1 ? "s" : ""} configured`}
               </div>
             </div>
           </div>
@@ -38,13 +40,22 @@ export function Header({ status, appCount, onReload }: HeaderProps) {
             <div className="version-badge" title="Panel version">
               {typeof VERSION === "undefined" ? "dev" : VERSION}
             </div>
-            <div className={`status-badge ${status.running ? "running" : ""}`}>
-              <div className="status-dot" />
-              <span>{status.running ? `nginx ${status.version}` : "nginx stopped"}</span>
-            </div>
-            <button className="btn btn-secondary btn-small" onClick={onReload}>
-              Reload
-            </button>
+            {status.enabled === false ? (
+              <div className="status-badge">
+                <div className="status-dot" style={{ backgroundColor: "var(--text-muted)", boxShadow: "none" }} />
+                <span style={{ color: "var(--text-muted)" }}>NGINX UNAVAILABLE</span>
+              </div>
+            ) : (
+              <>
+                <div className={`status-badge ${status.running ? "running" : ""}`}>
+                  <div className="status-dot" />
+                  <span>{status.running ? `nginx ${status.version}` : "nginx stopped"}</span>
+                </div>
+                <button className="btn btn-secondary btn-small" onClick={onReload}>
+                  Reload
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

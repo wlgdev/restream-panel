@@ -64,7 +64,7 @@ export async function getServers() {
 
 export async function getStatus() {
   // Update return type to include app.ip
-  return request<{ status: { nginx: { running: boolean; version: string }; app: { ip: string } } }>("/system/status");
+  return request<{ status: { nginx: { enabled?: boolean; running: boolean; version: string }; app: { ip: string } } }>("/system/status");
 }
 
 export async function createApplication(name: string, pushTargets: { serverId: string; streamKey: string }[]) {

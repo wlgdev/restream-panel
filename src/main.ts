@@ -33,18 +33,23 @@ srtMonitor.startBackgroundPolling();
 const absoluteConfigPath = resolve(process.cwd(), config.nginxConfigPath);
 const configService = new ConfigService(absoluteConfigPath);
 
-// Ensure config exists
-const loadResult = await configService.loadConfig();
-if (!loadResult.success) {
-  console.warn(`⚠️  Warning: Failed to load initial config from ${absoluteConfigPath}: ${loadResult.error}`);
-}
+let appCount = 0;
+let loadResult: any = { success: false, data: null };
 
-// Validate nginx config on startup
-const validation = await nginxService.validateConfig();
-if (!validation.success) {
-  console.error("❌ Invalid nginx configuration:");
-  console.error(validation.error);
-  process.exit(1);
+if (config.enableNginxConfig) {
+  // Ensure config exists
+  loadResult = await configService.loadConfig();
+  if (!loadResult.success) {
+    console.warn(`⚠️  Warning: Failed to load initial config from ${absoluteConfigPath}: ${loadResult.error}`);
+  }
+
+  // Validate nginx config on startup
+  const validation = await nginxService.validateConfig();
+  if (!validation.success) {
+    console.error("❌ Invalid nginx configuration:");
+    console.error(validation.error);
+    process.exit(1);
+  }
 }
 
 // Check for TLS certificate and key in the application directory
@@ -91,12 +96,14 @@ try {
       console.log(`   Cert: ${certPath}`);
     }
 
-    let appCount = 0;
-    if (loadResult.success && loadResult.data) {
-      appCount = loadResult.data.applications.length;
+    if (config.enableNginxConfig) {
+      if (loadResult.success && loadResult.data) {
+        appCount = loadResult.data.applications.length;
+      }
+      console.log(`Loaded ${appCount} applications`);
+    } else {
+      console.log(`NGINX Management is disabled (start with --nginx to enable)`);
     }
-
-    console.log(`Loaded ${appCount} applications`);
 
     console.log(`\n🚀 Restream Panel is running at ${protocol}://${config.ip}:${config.port}`);
     if (config.ip !== "localhost") {

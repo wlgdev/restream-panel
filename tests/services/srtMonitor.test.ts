@@ -48,7 +48,7 @@ describe("SrtMonitor", () => {
     expect(inbound?.protocol).toBe("SRT");
     expect(inbound?.stream_id).toBe("irl");
     expect(inbound?.peer_ip).toBe("109.63.168.164:62573");
-    expect(inbound?.rx_bps).toBe(0);
+    expect(inbound?.rx_bps).toBe(566629);
     expect(inbound?.rtt_jitter).toBe(0);
     expect(inbound?.recv_buffer_ms).toBe(3009);
     expect(inbound?.health).toBe(100);
@@ -56,7 +56,7 @@ describe("SrtMonitor", () => {
     expect(outbound).toBeDefined();
     expect(outbound?.stream_id).toBe("irl");
     expect(outbound?.peer_ip).toBe("109.63.168.164:60484");
-    expect(outbound?.tx_bps).toBe(0);
+    expect(outbound?.tx_bps).toBe(370056);
     expect(outbound?.rtt_jitter).toBe(0);
     expect(outbound?.send_buffer_ms).toBe(0);
     expect(outbound?.health).toBe(100);

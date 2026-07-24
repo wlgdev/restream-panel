@@ -14,7 +14,7 @@ export function Dashboard() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [servers, setServers] = useState<Server[]>([]);
   const [streamTargetIds, setStreamTargetIds] = useState<string[]>([]);
-  const [status, setStatus] = useState({ running: false, version: "" });
+  const [status, setStatus] = useState<{ enabled?: boolean; running: boolean; version: string }>({ enabled: true, running: false, version: "" });
   const [serverIp, setServerIp] = useState("");
   const [loading, setLoading] = useState(true);
   const [alert, setAlert] = useState<AlertState | null>(null);
@@ -30,25 +30,32 @@ export function Dashboard() {
       const serversResult = results[1];
       const statusResult = results[2];
 
-      if (appsResult.status === "fulfilled") {
-        setApplications(appsResult.value.applications || []);
-        setStreamTargetIds((appsResult.value.streamTargets || []).map((target) => target.id));
-      } else {
-        console.error("Failed to load applications:", appsResult.reason);
-        setAlert({ type: "error", message: "Failed to load applications" });
-      }
-
-      if (serversResult.status === "fulfilled") {
-        setServers(serversResult.value.servers || []);
-      }
-
+      let nginxEnabled = true;
       if (statusResult.status === "fulfilled") {
-        setStatus(statusResult.value.status?.nginx || { running: false, version: "" });
+        setStatus(statusResult.value.status?.nginx || { enabled: true, running: false, version: "" });
+        nginxEnabled = statusResult.value.status?.nginx?.enabled ?? true;
         if (statusResult.value.status?.app?.ip) {
           setServerIp(statusResult.value.status.app.ip);
         } else {
           setServerIp(window.location.hostname);
         }
+      }
+
+      if (nginxEnabled) {
+        if (appsResult.status === "fulfilled") {
+          setApplications(appsResult.value.applications || []);
+          setStreamTargetIds((appsResult.value.streamTargets || []).map((target) => target.id));
+        } else {
+          console.error("Failed to load applications:", appsResult.reason);
+          setAlert({ type: "error", message: "Failed to load applications" });
+        }
+      } else {
+        setApplications([]);
+        setStreamTargetIds([]);
+      }
+
+      if (serversResult.status === "fulfilled") {
+        setServers(serversResult.value.servers || []);
       }
     } catch (e) {
       console.error("Unexpected error loading data:", e);
@@ -102,7 +109,7 @@ export function Dashboard() {
       await api.reloadNginx();
       setAlert({ type: "success", message: "Nginx reloaded" });
       const statusRes = await api.getStatus();
-      setStatus(statusRes.status?.nginx || { running: false, version: "" });
+      setStatus(statusRes.status?.nginx || { enabled: true, running: false, version: "" });
     } catch {
       setAlert({ type: "error", message: "Failed to reload nginx" });
     }
@@ -150,63 +157,74 @@ export function Dashboard() {
       <div className="container">
         {alert && <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />}
 
-        <div className="toolbar">
-          <span className="toolbar-info">
-            {applications.length} application{applications.length !== 1 ? "s" : ""} • {customApps.length} custom
-          </span>
-          <button className="btn btn-primary" onClick={() => setShowCreateForm(true)}>
-            + New Application
-          </button>
-        </div>
-
-        {showCustomSection && (
-          <>
-            <div style={{ ...sectionLabelStyle, marginTop: 0 }}>Custom</div>
-            {customApps.map((app, i) => (
-              <ApplicationCard
-                key={app.name}
-                application={app}
-                index={i}
-                serverIp={displayIp}
-                onEdit={() => setEditingApp(app)}
-                onDelete={() => setConfirmDelete(app.name)}
-              />
-            ))}
-          </>
-        )}
-
-        {showStreamTargetsSection && (
-          <>
-            <div style={{ ...sectionLabelStyle, marginTop: showCustomSection ? sectionLabelStyle.margin : 0 }}>
-              TCP Proxy
-            </div>
-            {streamTargets.map((streamTarget, i) => (
-              <StreamTargetCard key={streamTarget.id} streamTarget={streamTarget} index={i} serverIp={displayIp} />
-            ))}
-          </>
-        )}
-
-        {showProtectedSection && (
-          <>
-            <div
-              style={{
-                ...sectionLabelStyle,
-                marginTop: showCustomSection || showStreamTargetsSection ? sectionLabelStyle.margin : 0,
-              }}
-            >
-              RTMP Protected
-            </div>
-            {protectedApps.map((app, i) => (
-              <ApplicationCard key={app.name} application={app} index={customApps.length + i} serverIp={displayIp} />
-            ))}
-          </>
-        )}
-
-        {applications.length === 0 && (
+        {status.enabled === false ? (
           <div className="empty-state">
-            <div className="empty-state-icon">📡</div>
-            <div className="empty-state-text">No applications configured</div>
+            <div className="empty-state-icon">⚙️</div>
+            <div className="empty-state-text">NGINX management is disabled</div>
+            <div style={{ color: "var(--text-muted)", fontSize: "0.875rem", marginTop: "0.5rem" }}>
+              Restart with <code style={{ color: "var(--text-primary)", background: "var(--bg-secondary)", padding: "0.125rem 0.25rem", borderRadius: "0.25rem" }}>--nginx</code> to manage configurations
+            </div>
           </div>
+        ) : (
+          <>
+            <div className="toolbar">
+              <span className="toolbar-info">
+                {applications.length} application{applications.length !== 1 ? "s" : ""} • {customApps.length} custom
+              </span>
+              <button className="btn btn-primary" onClick={() => setShowCreateForm(true)}>
+                + New Application
+              </button>
+            </div>
+            {showCustomSection && (
+              <>
+                <div style={{ ...sectionLabelStyle, marginTop: 0 }}>Custom</div>
+                {customApps.map((app, i) => (
+                  <ApplicationCard
+                    key={app.name}
+                    application={app}
+                    index={i}
+                    serverIp={displayIp}
+                    onEdit={() => setEditingApp(app)}
+                    onDelete={() => setConfirmDelete(app.name)}
+                  />
+                ))}
+              </>
+            )}
+
+            {showStreamTargetsSection && (
+              <>
+                <div style={{ ...sectionLabelStyle, marginTop: showCustomSection ? sectionLabelStyle.margin : 0 }}>
+                  TCP Proxy
+                </div>
+                {streamTargets.map((streamTarget, i) => (
+                  <StreamTargetCard key={streamTarget.id} streamTarget={streamTarget} index={i} serverIp={displayIp} />
+                ))}
+              </>
+            )}
+
+            {showProtectedSection && (
+              <>
+                <div
+                  style={{
+                    ...sectionLabelStyle,
+                    marginTop: showCustomSection || showStreamTargetsSection ? sectionLabelStyle.margin : 0,
+                  }}
+                >
+                  RTMP Protected
+                </div>
+                {protectedApps.map((app, i) => (
+                  <ApplicationCard key={app.name} application={app} index={customApps.length + i} serverIp={displayIp} />
+                ))}
+              </>
+            )}
+
+            {applications.length === 0 && (
+              <div className="empty-state">
+                <div className="empty-state-icon">📡</div>
+                <div className="empty-state-text">No applications configured</div>
+              </div>
+            )}
+          </>
         )}
 
         <footer className="footer">Restream Panel</footer>

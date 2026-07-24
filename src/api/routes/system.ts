@@ -5,11 +5,24 @@ import type { AppConfig } from "../../config";
 export function createSystemRoutes(nginxService: NginxService, config: AppConfig) {
   return new Elysia({ prefix: "/api/system" })
     .get("/status", async () => {
+      if (!config.enableNginxConfig) {
+        return {
+          success: true,
+          status: {
+            nginx: { enabled: false, running: false, version: "" },
+            app: {
+              ip: config.ip,
+            },
+          },
+          error: undefined,
+        };
+      }
+      
       const result = await nginxService.getStatus();
       return {
         success: result.success,
         status: {
-          nginx: result.data,
+          nginx: { enabled: true, ...result.data },
           app: {
             ip: config.ip,
           },

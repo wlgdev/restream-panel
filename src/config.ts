@@ -1,6 +1,7 @@
 export interface AppConfig {
   port: number;
   nginxConfigPath: string;
+  enableNginxConfig: boolean;
   auth: {
     username: string;
     password: string;
@@ -11,6 +12,7 @@ export interface AppConfig {
 export const DEFAULT_CONFIG: AppConfig = {
   port: 16969,
   nginxConfigPath: process.platform === "win32" ? "./mocks/nginx.conf" : "/etc/nginx/nginx.conf",
+  enableNginxConfig: false,
   auth: {
     username: "admin",
     password: "restream",
@@ -28,6 +30,16 @@ export function parseArgs(): Partial<AppConfig> {
       const port = parseInt(arg.split("=")[1] ?? "", 10);
       if (!isNaN(port) && port > 0 && port < 65536) {
         config.port = port;
+      }
+    }
+    if (arg === "--nginx") {
+      config.enableNginxConfig = true;
+    }
+    if (arg.startsWith("--nginx=")) {
+      config.enableNginxConfig = true;
+      const path = arg.split("=")[1];
+      if (path) {
+        config.nginxConfigPath = path;
       }
     }
     if (arg.startsWith("--config=")) {
@@ -91,6 +103,7 @@ export function loadConfig(): AppConfig {
   return {
     port: args.port ?? DEFAULT_CONFIG.port,
     nginxConfigPath: args.nginxConfigPath ?? DEFAULT_CONFIG.nginxConfigPath,
+    enableNginxConfig: args.enableNginxConfig ?? DEFAULT_CONFIG.enableNginxConfig,
     auth: args.auth ?? DEFAULT_CONFIG.auth,
     ip: args.ip ?? DEFAULT_CONFIG.ip,
   };
