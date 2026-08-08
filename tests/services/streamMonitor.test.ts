@@ -7,6 +7,7 @@ import {
   input4_good,
   input5_good,
   input6_good,
+  test_vk,
   vk_youtube1,
   vk_youtube2,
   vk_youtube3,
@@ -289,6 +290,34 @@ describe("StreamMonitor.collectOnce", () => {
 
     const snapshot = await monitor.collectOnce();
     expect(snapshot.data.map((item) => item.target)).toEqual(["UNKNOWN", "UNKNOWN", "INBOUND"]);
+  });
+
+  test("should detect and resolve an external RTMP push made by mediamtx", async () => {
+    const monitor = new StreamMonitor({
+      commandExecutor: () => ({
+        success: true,
+        stdout: test_vk,
+        stderr: "",
+      }),
+      rtmpTargetResolver: {
+        resolveTarget: async (ip) => {
+          expect(ip).toBe("45.136.22.83");
+          return "VK";
+        },
+      },
+    });
+
+    const snapshot = await monitor.collectOnce();
+
+    expect(snapshot.success).toBe(true);
+    expect(snapshot.data).toHaveLength(1);
+    expect(snapshot.data[0]).toMatchObject({
+      target: "VK",
+      pid: 242385,
+      local_ip: "85.92.111.45:36714",
+      peer_ip: "45.136.22.83:1935",
+      bytes_sent: 45781628,
+    });
   });
 
   test("should resolve outbound connections on port 1936 the same as 1935", async () => {

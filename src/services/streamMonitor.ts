@@ -173,20 +173,20 @@ export class StreamMonitor {
         if (peerAddress.endsWith(":443") && line.includes("stunnel4")) {
           targetName = "TWITCH";
         } else if (
-          line.includes("ffmpeg") &&
-          !peerAddress.startsWith("127.0.0.1")
+          (line.includes("ffmpeg") || line.includes("mediamtx")) &&
+          !StreamMonitor.isLoopbackAddress(peerAddress)
         ) {
           targetName = "UNKNOWN";
         } else if (
           StreamMonitor.isMonitoredInboundAddress(peerAddress) &&
           line.includes("nginx") &&
-          !peerAddress.startsWith("127.0.0.1")
+          !StreamMonitor.isLoopbackAddress(peerAddress)
         ) {
           targetName = "UNKNOWN";
         } else if (
           StreamMonitor.isMonitoredInboundAddress(localAddress) &&
           line.includes("nginx") &&
-          !localAddress.startsWith("127.0.0.1")
+          !StreamMonitor.isLoopbackAddress(localAddress)
         ) {
           targetName = "INBOUND";
         }
@@ -821,8 +821,17 @@ export class StreamMonitor {
     }
   }
 
+  private static isLoopbackAddress(address: string): boolean {
+    const ip = StreamMonitor.extractIp(address);
+    if (!ip) {
+      return false;
+    }
+
+    return ip === "::1" || ip.startsWith("127.");
+  }
+
   private static needsRtmpTargetResolution(metric: StreamMetrics): boolean {
-    return metric.target === "UNKNOWN" && metric.peer_ip !== null && !metric.peer_ip.startsWith("127.0.0.1");
+    return metric.target === "UNKNOWN" && metric.peer_ip !== null && !StreamMonitor.isLoopbackAddress(metric.peer_ip);
   }
 
   private static isMonitoredInboundAddress(address: string | null): boolean {

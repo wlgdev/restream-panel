@@ -391,3 +391,363 @@ srt_conns_packets_received_avg_belated_time 0
 srt_conns_packets_send_loss_rate 0
 srt_conns_packets_received_loss_rate 0
 srt_conns_outbound_frames_discarded 0`;
+
+export const srtAndForward1 = `# Paths
+paths{name="test",state="ready"} 1
+paths_readers{name="test",readerType="",state="ready"} 0
+paths_inbound_bytes{name="test",state="ready"} 1786756
+paths_outbound_bytes{name="test",state="ready"} 1549439
+paths_inbound_frames_in_error{name="test",state="ready"} 0
+paths{name="test2",state="notReady"} 1
+paths_readers{name="test2",readerType="",state="notReady"} 0
+paths_inbound_bytes{name="test2",state="notReady"} 0
+paths_outbound_bytes{name="test2",state="notReady"} 0
+paths_inbound_frames_in_error{name="test2",state="notReady"} 0
+
+# Paths (deprecated)
+paths_bytes_received{name="test",state="ready"} 1786756
+paths_bytes_sent{name="test",state="ready"} 1549439
+paths_bytes_received{name="test2",state="notReady"} 0
+paths_bytes_sent{name="test2",state="notReady"} 0
+
+# Forward destinations
+forward_dests{id="60570fdb-7c91-4007-9c66-ebec470aa5bd",path="test",protocol="rtmp",state="forwarding"} 1
+forward_dests_outbound_bytes{id="60570fdb-7c91-4007-9c66-ebec470aa5bd",path="test",protocol="rtmp",state="forwarding"} 32306401
+
+# RTMP connections
+rtmp_conns 0
+rtmp_conns_inbound_bytes 0
+rtmp_conns_outbound_bytes 0
+rtmp_conns_outbound_frames_discarded 0
+
+# RTMP connections (deprecated)
+rtmp_conns_bytes_received 0
+rtmp_conns_bytes_sent 0
+
+# SRT connections
+srt_conns{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 1
+srt_conns_packets_sent{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 4043
+srt_conns_packets_sent_unique{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_unique{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 4043
+srt_conns_packets_send_loss{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_loss{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_retrans{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_retrans{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_sent_ack{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 509
+srt_conns_packets_received_ack{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_sent_nak{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_nak{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_sent_km{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_km{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_us_snd_duration{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_belated{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_send_drop{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_drop{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_undecrypt{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_sent{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 5251092
+srt_conns_bytes_sent_unique{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received_unique{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 5251092
+srt_conns_bytes_received_loss{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_retrans{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received_retrans{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received_belated{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_send_drop{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received_drop{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received_undecrypt{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_us_packets_send_period{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 10.967254638671875
+srt_conns_packets_flow_window{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 25600
+srt_conns_packets_flight_size{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_ms_rtt{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0.16008181879565891
+srt_conns_mbps_send_rate{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_mbps_receive_rate{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 7.86039144685953
+srt_conns_mbps_link_capacity{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 4.267650050863648
+srt_conns_bytes_avail_send_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_avail_receive_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_mbps_max_bw{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} -1
+srt_conns_bytes_mss{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 1500
+srt_conns_packets_send_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_send_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_ms_send_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_ms_send_tsb_pd_delay{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 3000
+srt_conns_packets_receive_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 2540
+srt_conns_bytes_receive_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 3137344
+srt_conns_ms_receive_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 2989
+srt_conns_ms_receive_tsb_pd_delay{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 3000
+srt_conns_packets_reorder_tolerance{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_avg_belated_time{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_send_loss_rate{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_loss_rate{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_outbound_frames_discarded{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+`;
+
+export const srtAndForward2 = `
+# Paths
+paths{name="test",state="ready"} 1
+paths_readers{name="test",readerType="",state="ready"} 0
+paths_inbound_bytes{name="test",state="ready"} 18474176
+paths_outbound_bytes{name="test",state="ready"} 18236859
+paths_inbound_frames_in_error{name="test",state="ready"} 0
+paths{name="test2",state="notReady"} 1
+paths_readers{name="test2",readerType="",state="notReady"} 0
+paths_inbound_bytes{name="test2",state="notReady"} 0
+paths_outbound_bytes{name="test2",state="notReady"} 0
+paths_inbound_frames_in_error{name="test2",state="notReady"} 0
+
+# Paths (deprecated)
+paths_bytes_received{name="test",state="ready"} 18474176
+paths_bytes_sent{name="test",state="ready"} 18236859
+paths_bytes_received{name="test2",state="notReady"} 0
+paths_bytes_sent{name="test2",state="notReady"} 0
+
+# Forward destinations
+forward_dests{id="60570fdb-7c91-4007-9c66-ebec470aa5bd",path="test",protocol="rtmp",state="forwarding"} 1
+forward_dests_outbound_bytes{id="60570fdb-7c91-4007-9c66-ebec470aa5bd",path="test",protocol="rtmp",state="forwarding"} 48594632
+
+# RTMP connections
+rtmp_conns 0
+rtmp_conns_inbound_bytes 0
+rtmp_conns_outbound_bytes 0
+rtmp_conns_outbound_frames_discarded 0
+
+# RTMP connections (deprecated)
+rtmp_conns_bytes_received 0
+rtmp_conns_bytes_sent 0
+
+# SRT connections
+srt_conns{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 1
+srt_conns_packets_sent{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 17973
+srt_conns_packets_sent_unique{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_unique{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 17973
+srt_conns_packets_send_loss{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_loss{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_retrans{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_retrans{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_sent_ack{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 2158
+srt_conns_packets_received_ack{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_sent_nak{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_nak{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_sent_km{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_km{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_us_snd_duration{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_belated{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_send_drop{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_drop{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_undecrypt{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_sent{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 23291408
+srt_conns_bytes_sent_unique{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received_unique{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 23291408
+srt_conns_bytes_received_loss{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_retrans{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received_retrans{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received_belated{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_send_drop{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received_drop{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received_undecrypt{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_us_packets_send_period{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 10.967254638671875
+srt_conns_packets_flow_window{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 25600
+srt_conns_packets_flight_size{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_ms_rtt{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0.13707338927179658
+srt_conns_mbps_send_rate{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_mbps_receive_rate{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 7.724059454285272
+srt_conns_mbps_link_capacity{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0.9113716069215749
+srt_conns_bytes_avail_send_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_avail_receive_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_mbps_max_bw{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} -1
+srt_conns_bytes_mss{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 1500
+srt_conns_packets_send_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_send_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_ms_send_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_ms_send_tsb_pd_delay{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 3000
+srt_conns_packets_receive_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 2520
+srt_conns_bytes_receive_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 3115160
+srt_conns_ms_receive_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 3000
+srt_conns_ms_receive_tsb_pd_delay{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 3000
+srt_conns_packets_reorder_tolerance{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_avg_belated_time{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_send_loss_rate{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_loss_rate{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_outbound_frames_discarded{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0`;
+
+export const srtAndForward3 = `
+# Paths
+paths{name="test",state="ready"} 1
+paths_readers{name="test",readerType="",state="ready"} 0
+paths_inbound_bytes{name="test",state="ready"} 27711902
+paths_outbound_bytes{name="test",state="ready"} 27474585
+paths_inbound_frames_in_error{name="test",state="ready"} 0
+paths{name="test2",state="notReady"} 1
+paths_readers{name="test2",readerType="",state="notReady"} 0
+paths_inbound_bytes{name="test2",state="notReady"} 0
+paths_outbound_bytes{name="test2",state="notReady"} 0
+paths_inbound_frames_in_error{name="test2",state="notReady"} 0
+
+# Paths (deprecated)
+paths_bytes_received{name="test",state="ready"} 27711902
+paths_bytes_sent{name="test",state="ready"} 27474585
+paths_bytes_received{name="test2",state="notReady"} 0
+paths_bytes_sent{name="test2",state="notReady"} 0
+
+# Forward destinations
+forward_dests{id="60570fdb-7c91-4007-9c66-ebec470aa5bd",path="test",protocol="rtmp",state="forwarding"} 1
+forward_dests_outbound_bytes{id="60570fdb-7c91-4007-9c66-ebec470aa5bd",path="test",protocol="rtmp",state="forwarding"} 57739926
+
+# RTMP connections
+rtmp_conns 0
+rtmp_conns_inbound_bytes 0
+rtmp_conns_outbound_bytes 0
+rtmp_conns_outbound_frames_discarded 0
+
+# RTMP connections (deprecated)
+rtmp_conns_bytes_received 0
+rtmp_conns_bytes_sent 0
+
+# SRT connections
+srt_conns{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 1
+srt_conns_packets_sent{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 25746
+srt_conns_packets_sent_unique{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_unique{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 25746
+srt_conns_packets_send_loss{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_loss{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 93
+srt_conns_packets_retrans{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_retrans{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 91
+srt_conns_packets_sent_ack{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 3069
+srt_conns_packets_received_ack{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_sent_nak{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 3
+srt_conns_packets_received_nak{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_sent_km{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_km{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_us_snd_duration{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_belated{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_send_drop{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_drop{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_undecrypt{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_sent{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 33378572
+srt_conns_bytes_sent_unique{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received_unique{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 33378572
+srt_conns_bytes_received_loss{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 122437
+srt_conns_bytes_retrans{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received_retrans{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 123324
+srt_conns_bytes_received_belated{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_send_drop{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received_drop{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_received_undecrypt{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_us_packets_send_period{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 10.967254638671875
+srt_conns_packets_flow_window{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 25600
+srt_conns_packets_flight_size{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_ms_rtt{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0.2451078864194765
+srt_conns_mbps_send_rate{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_mbps_receive_rate{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 8.91270401454208
+srt_conns_mbps_link_capacity{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0.5995610143038612
+srt_conns_bytes_avail_send_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_avail_receive_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_mbps_max_bw{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} -1
+srt_conns_bytes_mss{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 1500
+srt_conns_packets_send_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_bytes_send_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_ms_send_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_ms_send_tsb_pd_delay{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 3000
+srt_conns_packets_receive_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 2615
+srt_conns_bytes_receive_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 3211980
+srt_conns_ms_receive_buf{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 3000
+srt_conns_ms_receive_tsb_pd_delay{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 3000
+srt_conns_packets_reorder_tolerance{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_avg_belated_time{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_send_loss_rate{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_packets_received_loss_rate{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0
+srt_conns_outbound_frames_discarded{id="80139161-4366-445f-949c-c940e7d65143",path="test",remoteAddr="[::1]:54773",state="publish"} 0`;
+
+export const srtAndForwardNull = `# Paths
+paths{name="test",state="notReady"} 1
+paths_readers{name="test",readerType="",state="notReady"} 0
+paths_inbound_bytes{name="test",state="notReady"} 0
+paths_outbound_bytes{name="test",state="notReady"} 0
+paths_inbound_frames_in_error{name="test",state="notReady"} 0
+paths{name="test2",state="notReady"} 1
+paths_readers{name="test2",readerType="",state="notReady"} 0
+paths_inbound_bytes{name="test2",state="notReady"} 0
+paths_outbound_bytes{name="test2",state="notReady"} 0
+paths_inbound_frames_in_error{name="test2",state="notReady"} 0
+
+# Paths (deprecated)
+paths_bytes_received{name="test",state="notReady"} 0
+paths_bytes_sent{name="test",state="notReady"} 0
+paths_bytes_received{name="test2",state="notReady"} 0
+paths_bytes_sent{name="test2",state="notReady"} 0
+
+# Forward destinations
+forward_dests{id="60570fdb-7c91-4007-9c66-ebec470aa5bd",path="test",protocol="rtmp",state="idle"} 1
+forward_dests_outbound_bytes{id="60570fdb-7c91-4007-9c66-ebec470aa5bd",path="test",protocol="rtmp",state="idle"} 66549816
+
+# RTMP connections
+rtmp_conns 0
+rtmp_conns_inbound_bytes 0
+rtmp_conns_outbound_bytes 0
+rtmp_conns_outbound_frames_discarded 0
+
+# RTMP connections (deprecated)
+rtmp_conns_bytes_received 0
+rtmp_conns_bytes_sent 0
+
+# SRT connections
+srt_conns 0
+srt_conns_packets_sent 0
+srt_conns_packets_received 0
+srt_conns_packets_sent_unique 0
+srt_conns_packets_received_unique 0
+srt_conns_packets_send_loss 0
+srt_conns_packets_received_loss 0
+srt_conns_packets_retrans 0
+srt_conns_packets_received_retrans 0
+srt_conns_packets_sent_ack 0
+srt_conns_packets_received_ack 0
+srt_conns_packets_sent_nak 0
+srt_conns_packets_received_nak 0
+srt_conns_packets_sent_km 0
+srt_conns_packets_received_km 0
+srt_conns_us_snd_duration 0
+srt_conns_packets_received_belated 0
+srt_conns_packets_send_drop 0
+srt_conns_packets_received_drop 0
+srt_conns_packets_received_undecrypt 0
+srt_conns_bytes_sent 0
+srt_conns_bytes_received 0
+srt_conns_bytes_sent_unique 0
+srt_conns_bytes_received_unique 0
+srt_conns_bytes_received_loss 0
+srt_conns_bytes_retrans 0
+srt_conns_bytes_received_retrans 0
+srt_conns_bytes_received_belated 0
+srt_conns_bytes_send_drop 0
+srt_conns_bytes_received_drop 0
+srt_conns_bytes_received_undecrypt 0
+srt_conns_us_packets_send_period 0
+srt_conns_packets_flow_window 0
+srt_conns_packets_flight_size 0
+srt_conns_ms_rtt 0
+srt_conns_mbps_send_rate 0
+srt_conns_mbps_receive_rate 0
+srt_conns_mbps_link_capacity 0
+srt_conns_bytes_avail_send_buf 0
+srt_conns_bytes_avail_receive_buf 0
+srt_conns_mbps_max_bw 0
+srt_conns_bytes_mss 0
+srt_conns_packets_send_buf 0
+srt_conns_bytes_send_buf 0
+srt_conns_ms_send_buf 0
+srt_conns_ms_send_tsb_pd_delay 0
+srt_conns_packets_receive_buf 0
+srt_conns_bytes_receive_buf 0
+srt_conns_ms_receive_buf 0
+srt_conns_ms_receive_tsb_pd_delay 0
+srt_conns_packets_reorder_tolerance 0
+srt_conns_packets_received_avg_belated_time 0
+srt_conns_packets_send_loss_rate 0
+srt_conns_packets_received_loss_rate 0
+srt_conns_outbound_frames_discarded 0
+`;
