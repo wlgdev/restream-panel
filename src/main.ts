@@ -18,7 +18,7 @@ const sharedEventLog = new StreamEventLog();
 
 const srtMonitor = new SrtMonitor({
   useMockData: isRunningFromSource && isLocalDevHost,
-  mockOutputs: [srtAndForward1, srtAndForward2, srtAndForward3, srtAndForwardNull],
+  mockOutputs: [srtAndForward1, srtAndForward2, srtAndForward3],
   eventLog: sharedEventLog,
 });
 const streamMonitor = new StreamMonitor({

@@ -765,7 +765,7 @@ h1 {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
-  min-width: 820px;
+  min-width: 880px;
 }
 
 .health-table th,
@@ -819,8 +819,12 @@ h1 {
   width: 8.5%;
 }
 
+.health-col-proto {
+  width: 4.5%;
+}
+
 .health-col-health {
-  width: 7%;
+  width: 6%;
 }
 
 .health-col-peer {
@@ -828,23 +832,23 @@ h1 {
 }
 
 .health-col-rate {
-  width: 10.5%;
-}
-
-.health-col-bytes {
-  width: 10%;
-}
-
-.health-col-rtt {
   width: 7%;
 }
 
+.health-col-bytes {
+  width: 11%;
+}
+
+.health-col-rtt {
+  width: 8%;
+}
+
 .health-col-queue {
-  width: 9%;
+  width: 6%;
 }
 
 .health-col-retrans {
-  width: 11%;
+  width: 10%;
 }
 
 .health-empty {
@@ -859,7 +863,8 @@ h1 {
 }
 
 .target-pill,
-.health-pill {
+.health-pill,
+.proto-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -877,6 +882,10 @@ h1 {
 
 .health-pill {
   min-width: 3rem;
+}
+
+.proto-pill {
+  min-width: 3.2rem;
 }
 
 .target-inbound {
@@ -913,6 +922,24 @@ h1 {
   background: rgba(34, 197, 94, 0.14);
   border-color: rgba(34, 197, 94, 0.28);
   color: #9ef0b8;
+}
+
+.proto-srt {
+  background: rgba(20, 184, 166, 0.14);
+  border-color: rgba(20, 184, 166, 0.28);
+  color: #5eead4;
+}
+
+.proto-rtmp {
+  background: rgba(99, 102, 241, 0.14);
+  border-color: rgba(99, 102, 241, 0.28);
+  color: #a5b4fc;
+}
+
+.proto-rtmps {
+  background: rgba(236, 72, 153, 0.14);
+  border-color: rgba(236, 72, 153, 0.28);
+  color: #f9a8d4;
 }
 
 .health-good {

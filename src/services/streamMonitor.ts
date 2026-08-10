@@ -5,6 +5,7 @@ import { StreamEventLog } from "./streamEventLog";
 
 export interface StreamMetrics {
   target: string;
+  protocol: "RTMP" | "RTMPS";
   stream_id?: string;
   pid: number | null;
   local_ip: string | null;
@@ -207,6 +208,12 @@ export class StreamMonitor {
 
           currentTarget = {
             target: targetName,
+            protocol:
+              targetName === "INBOUND"
+                ? "RTMP"
+                : peerAddress.endsWith(":443")
+                  ? "RTMPS"
+                  : "RTMP",
             recv_q: recvQ,
             send_q: sendQ,
             local_ip: localAddress,

@@ -288,94 +288,39 @@ export function Health() {
     .sort()
     .at(-1);
 
-  const renderRtmpTable = (items: StreamHealthItem[], inbound: StreamHealthItem | null) => (
+  const renderStreamTable = (items: StreamHealthItem[], inbound: StreamHealthItem | null) => (
     <div className="health-table-wrap">
       <table className="health-table">
         <colgroup>
           <col className="health-col-target" />
+          <col className="health-col-proto" />
           <col className="health-col-health" />
           <col className="health-col-peer" />
           <col className="health-col-rate" />
           <col className="health-col-rate" />
-          <col className="health-col-bytes" />
-          <col className="health-col-bytes" />
           <col className="health-col-rtt" />
+          <col className="health-col-bytes" />
           <col className="health-col-queue" />
           <col className="health-col-retrans" />
         </colgroup>
         <thead>
           <tr>
             <th>Target</th>
-            <th>Health</th>
-            <th>Peer</th>
-            <th>Tx</th>
-            <th>Rx</th>
-            <th>Sent</th>
-            <th>Received</th>
-            <th>RTT</th>
-            <th>Queue</th>
-            <th>Retrans</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item, idx) => (
-            <tr key={idx}>
-              <td className="health-badge-cell">
-                <span className={`target-pill target-${item.target.toLowerCase()}`}>{targetLabel(item.target)}</span>
-              </td>
-              <td className="health-badge-cell">
-                <span className={`health-pill ${healthClass(item.health)}`}>{item.health}%</span>
-              </td>
-              <td className="health-mono">{item.peer_ip ?? "-"}</td>
-              <td className={`health-mono ${txClass(item, inbound)}`}>{formatBitrate(item.tx_bps)}</td>
-              <td className="health-mono">{formatBitrate(item.rx_bps)}</td>
-              <td className="health-mono">{formatBytes(item.bytes_sent)}</td>
-              <td className="health-mono">{formatBytes(item.bytes_received)}</td>
-              <td className={`health-mono ${rttClass(item)}`}>{formatRtt(item.rtt)}</td>
-              <td className="health-mono">
-                {item.target === "INBOUND" ? formatBytes(item.recv_q) : formatBytes(item.send_q)}
-              </td>
-              <td className={`health-mono ${rtmpRetransClass(item)}`}>
-                {item.target === "INBOUND" ? "-" : `${item.drop_percent.toFixed(2)}% / ${item.retrans_total}`}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-
-  const renderSrtTable = (items: StreamHealthItem[], inbound: StreamHealthItem | null) => (
-    <div className="health-table-wrap">
-      <table className="health-table">
-        <colgroup>
-          <col className="health-col-target" />
-          <col className="health-col-health" />
-          <col className="health-col-peer" />
-          <col className="health-col-rate" />
-          <col className="health-col-rate" />
-          <col className="health-col-bytes" />
-          <col className="health-col-bytes" />
-          <col className="health-col-rtt" />
-          <col className="health-col-queue" />
-          <col className="health-col-retrans" />
-        </colgroup>
-        <thead>
-          <tr>
-            <th>Target</th>
+            <th>Proto</th>
             <th>Health</th>
             <th>Peer</th>
             <th>Tx</th>
             <th>Rx</th>
             <th>RTT</th>
-            <th>Buffer</th>
+            <th>Data/Buf</th>
             <th>Queue</th>
-            <th>Loss</th>
             <th>Retrans</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item, idx) => {
+            const isSrt = item.protocol === "SRT";
+            const protocol = item.protocol ?? "RTMP";
             const bufferMs = item.target === "INBOUND" ? (item.recv_buffer_ms ?? 0) : (item.send_buffer_ms ?? 0);
             const queueValue = item.target === "INBOUND" ? item.recv_q : item.send_q;
 
@@ -385,21 +330,36 @@ export function Health() {
                   <span className={`target-pill target-${item.target.toLowerCase()}`}>{targetLabel(item.target)}</span>
                 </td>
                 <td className="health-badge-cell">
+                  <span className={`proto-pill proto-${protocol.toLowerCase()}`}>{protocol}</span>
+                </td>
+                <td className="health-badge-cell">
                   <span className={`health-pill ${healthClass(item.health)}`}>{item.health}%</span>
                 </td>
                 <td className="health-mono">{item.peer_ip ?? "-"}</td>
                 <td className={`health-mono ${txClass(item, inbound)}`}>{formatBitrate(item.tx_bps)}</td>
                 <td className="health-mono">{formatBitrate(item.rx_bps)}</td>
                 <td className={`health-mono ${rttClass(item)}`}>
-                  {item.rtt > 0 ? `${item.rtt.toFixed(1)}` : "-"}/
-                  {item.rtt_jitter && item.rtt_jitter > 0 ? `${item.rtt_jitter.toFixed(1)}ms` : "-"}
+                  {isSrt
+                    ? `${item.rtt > 0 ? item.rtt.toFixed(1) : "-"}/${
+                        item.rtt_jitter && item.rtt_jitter > 0 ? `${item.rtt_jitter.toFixed(1)}ms` : "-"
+                      }`
+                    : formatRtt(item.rtt)}
                 </td>
-                <td className={`health-mono ${srtBufferClass(item)}`}>
-                  {bufferMs > 0 ? `${bufferMs.toFixed(0)} ms` : "-"}
+                <td className={`health-mono ${isSrt ? srtBufferClass(item) : ""}`}>
+                  {isSrt
+                    ? bufferMs > 0
+                      ? `${bufferMs.toFixed(0)} ms`
+                      : "-"
+                    : `${formatBytes(item.bytes_sent)}/${formatBytes(item.bytes_received)}`}
                 </td>
                 <td className="health-mono">{formatBytes(queueValue)}</td>
-                <td className={`health-mono ${srtLossClass(item)}`}>{item.drop_percent.toFixed(2)}%</td>
-                <td className="health-mono">{item.retrans_total}</td>
+                <td className={`health-mono ${isSrt ? srtLossClass(item) : rtmpRetransClass(item)}`}>
+                  {isSrt
+                    ? `${item.drop_percent.toFixed(2)}%/${item.retrans_total}`
+                    : item.target === "INBOUND"
+                      ? "-"
+                      : `${item.drop_percent.toFixed(2)}%/${item.retrans_total}`}
+                </td>
               </tr>
             );
           })}
@@ -493,9 +453,6 @@ export function Health() {
 
               const minHealth = Math.min(...allItems.map((item) => item.health));
 
-              const srtItems = allItems.filter((i) => "protocol" in i && (i as any).protocol === "SRT");
-              const rtmpItems = allItems.filter((i) => !("protocol" in i) || (i as any).protocol !== "SRT");
-
               return (
                 <div key={`combined-${stream.id}`} className="stream-card">
                   <div
@@ -510,8 +467,7 @@ export function Health() {
                     {stream.outbound.length > 0 &&
                       ` • ${stream.outbound.length} consumer${stream.outbound.length !== 1 ? "s" : ""}`}
                   </div>
-                  {srtItems.length > 0 && renderSrtTable(srtItems, stream.inbound)}
-                  {rtmpItems.length > 0 && renderRtmpTable(rtmpItems, stream.inbound)}
+                  {allItems.length > 0 && renderStreamTable(allItems, stream.inbound)}
                 </div>
               );
             })}
@@ -529,7 +485,7 @@ export function Health() {
                   <div className="card-subtitle">Connections not matched to a logical stream</div>
                 </div>
               </div>
-              {renderRtmpTable(orphanRtmp, null)}
+              {renderStreamTable(orphanRtmp, null)}
             </section>
           );
         })()}
@@ -545,7 +501,7 @@ export function Health() {
                   <div className="card-subtitle">Connections not matched to a logical stream</div>
                 </div>
               </div>
-              {renderSrtTable(orphanSrt, null)}
+              {renderStreamTable(orphanSrt, null)}
             </section>
           );
         })()}
