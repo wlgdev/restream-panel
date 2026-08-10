@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { srt1, srt2, srt3, srtNull } from "../../mocks/srt";
+import { srt1, srt2, srt3, srtNull, srtAndForward1, srtAndForwardNull } from "../../mocks/srt";
 import { SrtMonitor } from "../../src/services/srtMonitor";
 
 const extractMetric = (sample: string, metric: string, state: "publish" | "read"): number => {
@@ -126,5 +126,77 @@ describe("SrtMonitor", () => {
       extractMetric(srt2, "srt_conns_bytes_received", "publish"),
       extractMetric(srt3, "srt_conns_bytes_received", "publish"),
     ]);
+  });
+
+  test("exposes the active forward destination remoteAddr -> path via getForwardMap", async () => {
+    const monitor = new SrtMonitor({
+      metricsFetcher: async () => ({
+        success: true,
+        stdout: srtAndForward1,
+        stderr: "",
+      }),
+    });
+
+    await monitor.collectOnce();
+
+    expect(monitor.getForwardMap().get("185.226.53.77:1935")).toBe("test");
+  });
+
+  test("parses SRT inbound from the combined metrics payload without losing forward section", async () => {
+    const monitor = new SrtMonitor({
+      metricsFetcher: async () => ({
+        success: true,
+        stdout: srtAndForward1,
+        stderr: "",
+      }),
+    });
+
+    const snapshot = await monitor.collectOnce();
+
+    // The paths/rtmp/forward sections must not break srt_conns parsing.
+    const inbound = snapshot.data.find((item) => item.target === "INBOUND");
+    expect(inbound).toBeDefined();
+    expect(inbound?.stream_id).toBe("test");
+    expect(inbound?.peer_ip).toBe("[::1]:50763");
+
+    // Forward data does NOT leak into the SRT metrics shown on the panel.
+    expect(snapshot.data.every((item) => item.protocol === "SRT")).toBe(true);
+    expect(snapshot.streams).toHaveLength(1);
+    expect(snapshot.streams[0]?.id).toBe("test");
+  });
+
+  test("keeps the forward map empty when the only forward destination is idle", async () => {
+    const monitor = new SrtMonitor({
+      metricsFetcher: async () => ({
+        success: true,
+        stdout: srtAndForwardNull,
+        stderr: "",
+      }),
+    });
+
+    await monitor.collectOnce();
+
+    // state="idle" with no remoteAddr must not correlate to anything.
+    expect(monitor.getForwardMap().size).toBe(0);
+    expect(monitor.getSnapshot().data).toHaveLength(0);
+  });
+
+  test("default metrics fetcher targets /metrics with no query string", async () => {
+    const realFetch = globalThis.fetch;
+    let requestedUrl = "";
+
+    globalThis.fetch = (async (input: any) => {
+      requestedUrl = typeof input === "string" ? input : input.toString();
+      return new Response("# srt_conns 0", { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      const monitor = new SrtMonitor();
+      await monitor.collectOnce();
+      expect(requestedUrl).toBe("http://localhost:9998/metrics");
+      expect(requestedUrl).not.toContain("?");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });

@@ -12,7 +12,9 @@ import {
   vk_youtube2,
   vk_youtube3,
 } from "../../mocks/ss";
+import { srtAndForward1 } from "../../mocks/srt";
 import { StreamMonitor } from "../../src/services/streamMonitor";
+import { SrtMonitor } from "../../src/services/srtMonitor";
 
 const extractStdout = (sample: string | { stdout: string; elapsedMs?: number }): string =>
   typeof sample === "string" ? sample : sample.stdout;
@@ -301,7 +303,7 @@ describe("StreamMonitor.collectOnce", () => {
       }),
       rtmpTargetResolver: {
         resolveTarget: async (ip) => {
-          expect(ip).toBe("45.136.22.83");
+          expect(ip).toBe("185.226.53.77");
           return "VK";
         },
       },
@@ -315,9 +317,100 @@ describe("StreamMonitor.collectOnce", () => {
       target: "VK",
       pid: 242385,
       local_ip: "85.92.111.45:36714",
-      peer_ip: "45.136.22.83:1935",
+      peer_ip: "185.226.53.77:1935",
       bytes_sent: 45781628,
     });
+  });
+
+  test("correlates mediamtx outbound RTMP socket to a forward path via the forward map", async () => {
+    const monitor = new StreamMonitor({
+      commandExecutor: () => ({
+        success: true,
+        stdout: test_vk,
+        stderr: "",
+      }),
+      forwardMapProvider: () => new Map([["185.226.53.77:1935", "test"]]),
+      rtmpTargetResolver: {
+        resolveTarget: async () => "VK",
+      },
+    });
+
+    const snapshot = await monitor.collectOnce();
+
+    expect(snapshot.success).toBe(true);
+    expect(snapshot.data).toHaveLength(1);
+    const mediamtx = snapshot.data[0];
+    expect(mediamtx).toMatchObject({
+      target: "VK",
+      stream_id: "test",
+      pid: 242385,
+      peer_ip: "185.226.53.77:1935",
+    });
+    // The pre-labeled mediamtx outbound is grouped into logical stream "test"
+    expect(snapshot.streams).toHaveLength(1);
+    expect(snapshot.streams[0]?.id).toBe("test");
+    expect(snapshot.streams[0]?.outbound).toHaveLength(1);
+    expect(snapshot.streams[0]?.outbound[0]?.peer_ip).toBe("185.226.53.77:1935");
+  });
+
+  test("does not assign a forward path when the peer address is absent from the map", async () => {
+    const monitor = new StreamMonitor({
+      commandExecutor: () => ({
+        success: true,
+        stdout: test_vk,
+        stderr: "",
+      }),
+      // map covers a different destination, so the mediamtx socket stays unlabeled
+      forwardMapProvider: () => new Map([["127.0.0.1:1935", "other"]]),
+      rtmpTargetResolver: {
+        resolveTarget: async () => "VK",
+      },
+    });
+
+    const snapshot = await monitor.collectOnce();
+
+    expect(snapshot.data).toHaveLength(1);
+    expect(snapshot.data[0]?.stream_id).toBeUndefined();
+  });
+
+  test("correlates mediamtx outbound to SRT-inbound across monitors via the forward map", async () => {
+    // Real SrtMonitor driven by the custom mediamtx metrics (paths + forward + srt_conns).
+    const srtMonitor = new SrtMonitor({
+      metricsFetcher: async () => ({
+        success: true,
+        stdout: srtAndForward1,
+        stderr: "",
+      }),
+    });
+    await srtMonitor.collectOnce();
+
+    // The forward section exposes the active destination's remoteAddr -> path.
+    expect(srtMonitor.getForwardMap().get("185.226.53.77:1935")).toBe("test");
+    // SRT-inbound is still parsed off the same payload (path="test").
+    expect(
+      srtMonitor.getSnapshot().data.some((m) => m.stream_id === "test" && m.target === "INBOUND"),
+    ).toBe(true);
+
+    // Real StreamMonitor driven by ss output, reading the forward map from SrtMonitor.
+    const streamMonitor = new StreamMonitor({
+      commandExecutor: () => ({
+        success: true,
+        stdout: test_vk,
+        stderr: "",
+      }),
+      forwardMapProvider: () => srtMonitor.getForwardMap(),
+      rtmpTargetResolver: {
+        resolveTarget: async () => "VK",
+      },
+    });
+    const snapshot = await streamMonitor.collectOnce();
+
+    const mediamtx = snapshot.data.find((m) => m.pid === 242385);
+    // Cross-monitor correlation: the mediamtx outbound socket picked up the path.
+    expect(mediamtx?.stream_id).toBe("test");
+    expect(mediamtx?.target).toBe("VK");
+    // ...and landed in the same logical stream the SRT-inbound belongs to.
+    expect(snapshot.streams.some((s) => s.id === "test")).toBe(true);
   });
 
   test("should resolve outbound connections on port 1936 the same as 1935", async () => {

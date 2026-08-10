@@ -3,9 +3,9 @@ import { loadConfig } from "./config";
 import { ConfigService } from "./services/configService";
 import { NginxService } from "./services/nginxService";
 import { StreamMonitor } from "./services/streamMonitor";
-import { vk_youtube1, vk_youtube2, vk_youtube3 } from "../mocks/ss";
+import { test_vk } from "../mocks/ss";
 import { SrtMonitor } from "./services/srtMonitor";
-import { srt1, srt2, srt3, srtNull } from "../mocks/srt";
+import { srtAndForward1, srtAndForward2, srtAndForward3, srtAndForwardNull } from "../mocks/srt";
 import { resolve, join } from "path";
 import { StreamEventLog } from "./services/streamEventLog";
 
@@ -16,14 +16,15 @@ const isLocalDevHost = config.ip === "localhost" || config.ip === "127.0.0.1";
 
 const sharedEventLog = new StreamEventLog();
 
-const streamMonitor = new StreamMonitor({
-  useMockData: isRunningFromSource && isLocalDevHost,
-  mockOutputs: [vk_youtube1, vk_youtube2, vk_youtube3],
-  eventLog: sharedEventLog,
-});
 const srtMonitor = new SrtMonitor({
   useMockData: isRunningFromSource && isLocalDevHost,
-  mockOutputs: [srt1, srt2, srt3, srtNull],
+  mockOutputs: [srtAndForward1, srtAndForward2, srtAndForward3, srtAndForwardNull],
+  eventLog: sharedEventLog,
+});
+const streamMonitor = new StreamMonitor({
+  useMockData: isRunningFromSource && isLocalDevHost,
+  mockOutputs: [test_vk],
+  forwardMapProvider: () => srtMonitor.getForwardMap(),
   eventLog: sharedEventLog,
 });
 streamMonitor.startBackgroundPolling();

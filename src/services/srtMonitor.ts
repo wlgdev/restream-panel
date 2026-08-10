@@ -56,6 +56,14 @@ interface RawSrtMetric {
   metrics: Record<string, number>;
 }
 
+interface ForwardDest {
+  id: string;
+  path: string;
+  protocol: string;
+  remoteAddr: string | null;
+  state: string;
+}
+
 interface SrtPreviousState {
   packets_received_drop: number;
   packets_send_drop: number;
@@ -126,6 +134,10 @@ export class SrtMonitor {
   private readonly activeStreams = new Map<string, ActiveSrtStreamState>();
   private readonly lastKnownConnections = new Map<string, { target: string; peerIp: string | null }>();
 
+  // Map of forward remoteAddr (ip:port) -> path, derived from the forward_dests metrics
+  // section. Consumed by StreamMonitor to correlate mediamtx outbound RTMP sockets with a path.
+  private lastForwardMap = new Map<string, string>();
+
   private readonly metricsFetcher: () => Promise<CommandExecutionResult>;
   private readonly now: () => number;
   private readonly useMockData: boolean;
@@ -182,6 +194,49 @@ export class SrtMonitor {
     return [...connections.values()];
   }
 
+  public parseForwardDestinations(output: string): ForwardDest[] {
+    const dests = new Map<string, ForwardDest>();
+
+    for (const line of output.split("\n")) {
+      // Only the base counter line starts with `forward_dests{`; skip derivatives like
+      // `forward_dests_outbound_bytes{...}`. remoteAddr is only emitted while the forward
+      // is actually forwarding, so it may be absent (state="idle").
+      const match = line.match(
+        /^forward_dests\{id="([^"]+)",path="([^"]+)",protocol="([^"]+)"(?:,remoteAddr="([^"]+)")?,state="([^"]+)"\}\s+\d+/,
+      );
+      if (!match) continue;
+
+      const id = match[1]!;
+      if (dests.has(id)) continue;
+
+      dests.set(id, {
+        id,
+        path: match[2]!,
+        protocol: match[3]!,
+        remoteAddr: match[4] ? match[4] : null,
+        state: match[5]!,
+      });
+    }
+
+    return [...dests.values()];
+  }
+
+  public getForwardMap(): Map<string, string> {
+    return this.lastForwardMap;
+  }
+
+  private buildForwardMap(dests: ForwardDest[]): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const dest of dests) {
+      // Only actively-forwarding destinations expose a real remoteAddr; idle ones either lack
+      // the label (no live socket yet) or hold it with state="idle", and must not correlate.
+      if (dest.state !== "idle" && dest.remoteAddr) {
+        map.set(dest.remoteAddr, dest.path);
+      }
+    }
+    return map;
+  }
+
   public async touchClient(clientId: string): Promise<void> {
     this.activeClients.set(clientId, this.now());
 
@@ -222,6 +277,7 @@ export class SrtMonitor {
     try {
       const rawData = this.parse(commandResult.stdout);
       const data = rawData.map((raw) => this.calculateHealth(raw));
+      this.lastForwardMap = this.buildForwardMap(this.parseForwardDestinations(commandResult.stdout));
       this.syncActiveStreams(data);
       const streams = this.buildLogicalStreams(data);
 
@@ -571,7 +627,7 @@ export class SrtMonitor {
 
   private static async fetchMetrics(): Promise<CommandExecutionResult> {
     try {
-      const response = await fetch("http://localhost:9998/metrics?type=srt_conns");
+      const response = await fetch("http://localhost:9998/metrics");
       if (!response.ok) {
         return {
           success: false,

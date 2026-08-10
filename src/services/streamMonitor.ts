@@ -88,6 +88,7 @@ interface StreamMonitorOptions {
   intervalMs?: number;
   clientTtlMs?: number;
   rtmpTargetResolver?: Pick<RtmpTargetResolver, "resolveTarget">;
+  forwardMapProvider?: () => Map<string, string>;
   eventLog?: StreamEventLog;
 }
 
@@ -131,8 +132,13 @@ export class StreamMonitor {
   private readonly intervalMs: number;
   private readonly clientTtlMs: number;
   private readonly rtmpTargetResolver: Pick<RtmpTargetResolver, "resolveTarget">;
+  private readonly forwardMapProvider?: () => Map<string, string>;
   private readonly eventLog: StreamEventLog;
   private readonly lastKnownConnections = new Map<string, { target: string; streamId: string; peerIp: string | null; loggedStart?: boolean }>();
+
+  // remoteAddr (ip:port) -> path, mirrored from SrtMonitor's forward map each tick so that
+  // outbound mediamtx sockets (which carry no path of their own) can be correlated to a path.
+  private lastForwardMap = new Map<string, string>();
 
   public constructor(options: StreamMonitorOptions = {}) {
     this.commandExecutor = options.commandExecutor ?? StreamMonitor.executeSsCommand;
@@ -143,6 +149,7 @@ export class StreamMonitor {
     this.intervalMs = options.intervalMs ?? 5000;
     this.clientTtlMs = options.clientTtlMs ?? 15000;
     this.rtmpTargetResolver = options.rtmpTargetResolver ?? new RtmpTargetResolver();
+    this.forwardMapProvider = options.forwardMapProvider;
     this.eventLog = options.eventLog ?? new StreamEventLog();
   }
 
@@ -205,7 +212,9 @@ export class StreamMonitor {
             local_ip: localAddress,
             peer_ip: peerAddress,
             pid,
-            stream_id: line.includes("ffmpeg") ? (this.getFfmpegStreamId(pid) ?? undefined) : undefined,
+            stream_id: line.includes("ffmpeg")
+              ? (this.getFfmpegStreamId(pid) ?? undefined)
+              : this.getForwardStreamId(peerAddress),
           };
         }
 
@@ -283,6 +292,7 @@ export class StreamMonitor {
     }
 
     try {
+      this.lastForwardMap = this.forwardMapProvider?.() ?? new Map<string, string>();
       const data = this.parse(commandResult.stdout);
       await this.resolveRtmpTargets(data);
       this.assignStreams(data);
@@ -437,6 +447,19 @@ export class StreamMonitor {
 
     this.processStreamIdCache.set(pid, null);
     return null;
+  }
+
+  private getForwardStreamId(peerAddress: string): string | undefined {
+    // mediamtx outbound RTMP sockets carry no path of their own (mediamtx is one
+    // process shared by all forwards, so cmdline cannot disambiguate them the way
+    // it does for per-stream ffmpeg). Correlate them against the forward_dests
+    // remoteAddr -> path map mirrored from SrtMonitor. Try the bracket-stripped
+    // form first, then the raw address, so an IPv6 peer matches regardless of
+    // whether mediamtx emitted its remoteAddr with surrounding brackets.
+    return (
+      this.lastForwardMap.get(StreamMonitor.normalizeAddr(peerAddress)) ??
+      this.lastForwardMap.get(peerAddress)
+    );
   }
 
   private connectionKey(metric: StreamMetrics): string {
@@ -857,6 +880,16 @@ export class StreamMonitor {
     }
 
     return address.slice(0, lastColon);
+  }
+
+  private static normalizeAddr(address: string): string {
+    // Strip IPv6 brackets ([::1]:port -> ::1:port) so an address compares the same
+    // whether it came from ss (always bracketed for IPv6) or from mediamtx metrics.
+    // IPv4 addresses have no leading bracket and are returned unchanged.
+    if (!address.startsWith("[")) return address;
+    const close = address.indexOf("]");
+    if (close < 0) return address;
+    return address.slice(1, close) + address.slice(close + 1);
   }
 
   private static estimateSendDelayMs(target: StreamMetrics): number {
