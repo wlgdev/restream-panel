@@ -62,6 +62,25 @@ describe("SrtMonitor", () => {
     expect(outbound?.health).toBe(100);
   });
 
+  test("parse ignores mediamtx internal rtmp_conns loopback readers", () => {
+    const monitor = new SrtMonitor();
+    const raw = monitor.parse(`# RTMP connections
+rtmp_conns{id="4562d0e5-bc3e-4f08-ad0e-35ec9421fa3f",path="vk",remoteAddr="127.0.0.1:42392",state="read"} 1
+rtmp_conns_inbound_bytes{id="4562d0e5-bc3e-4f08-ad0e-35ec9421fa3f",path="vk",remoteAddr="127.0.0.1:42392",state="read"} 3429
+rtmp_conns_outbound_bytes{id="4562d0e5-bc3e-4f08-ad0e-35ec9421fa3f",path="vk",remoteAddr="127.0.0.1:42392",state="read"} 2703122828
+# RTMP connections (deprecated)
+rtmp_conns_bytes_received{id="4562d0e5-bc3e-4f08-ad0e-35ec9421fa3f",path="vk",remoteAddr="127.0.0.1:42392",state="read"} 3429
+# SRT connections
+srt_conns{id="a9b0be6b-2fd4-4db3-8883-57fce50c14c4",path="vk",remoteAddr="93.187.97.206:62823",state="publish"} 1
+srt_conns_ms_rtt{id="a9b0be6b-2fd4-4db3-8883-57fce50c14c4",path="vk",remoteAddr="93.187.97.206:62823",state="publish"} 1.717739087178275
+`);
+
+    expect(raw).toHaveLength(1);
+    expect(raw[0]?.id).toBe("a9b0be6b-2fd4-4db3-8883-57fce50c14c4");
+    expect(raw[0]?.remoteAddr).toBe("93.187.97.206:62823");
+    expect(raw.find((item) => item.remoteAddr === "127.0.0.1:42392")).toBeUndefined();
+  });
+
   test("should degrade health when loss, drops and buffering increase across ticks", async () => {
     const mockOutputs = [srt1, srt2, srt3, srtNull];
     let idx = 0;

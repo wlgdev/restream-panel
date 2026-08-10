@@ -163,8 +163,12 @@ export class SrtMonitor {
     for (const line of lines) {
       if (!line || line.startsWith("#")) continue;
 
+      // Only srt_conns* metrics describe SRT connections. mediamtx emits rtmp_conns* with the
+      // same label shape (id/path/remoteAddr/state); the bare [a-z_]+ prefix would treat an
+      // internal RTMP reader (e.g. remoteAddr="127.0.0.1:...") as a bogus SRT outbound with
+      // all-zero metrics. Pin the prefix to srt_conns so non-SRT connection metrics are ignored.
       const match = line.match(
-        /^([a-z_]+)\{id="([^"]+)",path="([^"]+)",remoteAddr="([^"]+)",state="([^"]+)"\}\s+([0-9.\-e+]+)/,
+        /^(srt_conns[a-z_]*)\{id="([^"]+)",path="([^"]+)",remoteAddr="([^"]+)",state="([^"]+)"\}\s+([0-9.\-e+]+)/,
       );
 
       if (!match) {
