@@ -120,6 +120,18 @@ ESTAB             0                   0                     [::ffff:127.0.0.1]:9
     expect(metrics).toHaveLength(0);
   });
 
+  test("should drop internal mediamtx<->ffmpeg loopback relay sockets (both directions)", () => {
+    const monitor = new StreamMonitor();
+    const metrics = monitor.parse(`State             Recv-Q              Send-Q                          Local Address:Port                              Peer Address:Port              Process
+ESTAB             0                   0                              127.0.0.1:42392                         127.0.0.1:1940        users:(("ffmpeg",pid=654456,fd=3))
+         ts sack cubic wscale:9,9 rto:214 rtt:13.197/5.5 ato:40 mss:39936 pmtu:65535 bytes_sent:4424 bytes_received:164646660 data_segs_out:281 retrans:0/9
+ESTAB             0                   0                     [::ffff:127.0.0.1]:1940                 [::ffff:127.0.0.1]:42392       users:(("mediamtx",pid=643038,fd=12))
+         ts sack cubic wscale:9,9 rto:209 rtt:8.323/4.503 ato:40 mss:65483 pmtu:65535 bytes_sent:164667503 bytes_received:4388 data_segs_out:14906 retrans:0/1
+`);
+
+    expect(metrics).toHaveLength(0);
+  });
+
   test("should calculate rates and drop percentage from previous tick", () => {
     const monitor = new StreamMonitor({
       commandExecutor: () => ({

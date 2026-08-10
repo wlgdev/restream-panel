@@ -178,6 +178,13 @@ export class StreamMonitor {
 
         let targetName = "";
 
+        // Loopback<->loopback sockets are internal relays (mediamtx<->ffmpeg, mediamtx metrics
+        // endpoint, etc.): a real stream's peer is always a remote encoder or remote RTMP target.
+        // Drop them outright rather than letting one slip through as a bogus UNKNOWN stream.
+        if (StreamMonitor.isLoopbackAddress(peerAddress)) {
+          continue;
+        }
+
         if (peerAddress.endsWith(":443") && line.includes("stunnel4")) {
           targetName = "TWITCH";
         } else if (
