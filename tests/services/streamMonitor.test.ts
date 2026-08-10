@@ -110,6 +110,16 @@ ESTAB             0                   0                                194.5.78.
     });
   });
 
+  test("should drop loopback<->loopback sockets mediamtx opens to itself (IPv4-mapped IPv6)", () => {
+    const monitor = new StreamMonitor();
+    const metrics = monitor.parse(`State             Recv-Q              Send-Q                          Local Address:Port                              Peer Address:Port              Process
+ESTAB             0                   0                     [::ffff:127.0.0.1]:9998                 [::ffff:127.0.0.1]:32854               users:(("mediamtx",pid=85246,fd=11))
+         ts sack cubic wscale:9,9 rto:201 rtt:0.018/0.002 ato:40 mss:50176 pmtu:65535 bytes_sent:6512320 bytes_received:259800 data_segs_out:1732 retrans:0/0
+`);
+
+    expect(metrics).toHaveLength(0);
+  });
+
   test("should calculate rates and drop percentage from previous tick", () => {
     const monitor = new StreamMonitor({
       commandExecutor: () => ({

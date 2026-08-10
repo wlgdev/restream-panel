@@ -857,7 +857,13 @@ export class StreamMonitor {
       return false;
     }
 
-    return ip === "::1" || ip.startsWith("127.");
+    // ss emits IPv4-mapped IPv6 addresses bracketed (e.g. "[::ffff:127.0.0.1]:32854").
+    // Strip the ::ffff: prefix so the underlying IPv4 loopback check applies — otherwise
+    // loopback<->loopback sockets mediamtx opens to itself would slip past the filter
+    // and surface in the dashboard as a bogus RTMP stream.
+    const normalized = ip.startsWith("::ffff:") ? ip.slice("::ffff:".length) : ip;
+
+    return normalized === "::1" || normalized.startsWith("127.");
   }
 
   private static needsRtmpTargetResolution(metric: StreamMetrics): boolean {
