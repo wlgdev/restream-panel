@@ -5,6 +5,7 @@ import type {
   LogicalStreamItem,
   StreamHealthItem,
   StreamEvent,
+  Track,
 } from "../types";
 import * as api from "../api";
 
@@ -110,6 +111,28 @@ export function Health() {
     if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
     if (minutes > 0) return `${minutes}m ${seconds}s`;
     return `${seconds}s`;
+  };
+
+  // Render a single mediamtx track as a short token. Video tracks carry resolution +
+  // profile/level; audio tracks carry sample rate + channels. A track is treated as audio
+  // when its codecProps expose sampleRate/channelCount (mediamtx never sets width/height on
+  // audio, nor sampleRate/channelCount on video), so the two kinds render distinctly even
+  // when the codec string alone is ambiguous.
+  const formatTrack = (track: Track): string => {
+    const props = track.codecProps ?? {};
+    const isAudio = props.sampleRate !== undefined || props.channelCount !== undefined;
+
+    if (isAudio) {
+      const rate = props.sampleRate
+        ? `${props.sampleRate % 1000 === 0 ? props.sampleRate / 1000 : (props.sampleRate / 1000).toFixed(1)} kHz`
+        : null;
+      const channels = props.channelCount ? `${props.channelCount}ch` : null;
+      return [track.codec, rate, channels].filter(Boolean).join(" ");
+    }
+
+    const resolution = props.width && props.height ? `${props.width}×${props.height}` : null;
+    const profile = props.profile ? `${props.profile}${props.level ? `@${props.level}` : ""}` : null;
+    return [track.codec, resolution, profile].filter(Boolean).join(" ");
   };
 
   const handleLogScroll = () => {
@@ -243,6 +266,7 @@ export function Health() {
         startedAt: number;
         inbound: StreamHealthItem | null;
         outbound: StreamHealthItem[];
+        tracks?: Track[];
       }
     >();
 
@@ -253,6 +277,7 @@ export function Health() {
           startedAt: s.startedAt,
           inbound: s.inbound,
           outbound: [...s.outbound],
+          tracks: s.tracks,
         });
       }
     }
@@ -266,12 +291,16 @@ export function Health() {
             existing.inbound = s.inbound;
           }
           existing.startedAt = Math.min(existing.startedAt, s.startedAt);
+          if (!existing.tracks?.length && s.tracks?.length) {
+            existing.tracks = s.tracks;
+          }
         } else {
           map.set(s.id, {
             id: s.id,
             startedAt: s.startedAt,
             inbound: s.inbound,
             outbound: [...s.outbound],
+            tracks: s.tracks,
           });
         }
       }
@@ -451,22 +480,28 @@ export function Health() {
               if (stream.inbound) allItems.push(stream.inbound);
               allItems.push(...stream.outbound);
 
-              const minHealth = Math.min(...allItems.map((item) => item.health));
+              const tracks = stream.tracks?.length ? stream.tracks : null;
 
               return (
                 <div key={`combined-${stream.id}`} className="stream-card">
                   <div
                     className="card-subtitle"
-                    style={{ textAlign: "center", marginBottom: "1rem", marginTop: "-0.5rem" }}
+                    style={{
+                      textAlign: "center",
+                      marginBottom: tracks ? "0.3rem" : "1rem",
+                      marginTop: "-0.5rem",
+                    }}
                   >
-                    <span className={`health-pill ${healthClass(minHealth)}`} style={{ marginRight: "0.5rem" }}>
-                      {minHealth}%
-                    </span>
                     Stream {stream.id} • {stream.inbound?.peer_ip ?? "Unknown source"} • Uptime{" "}
                     {formatDuration(stream.startedAt)}
                     {stream.outbound.length > 0 &&
                       ` • ${stream.outbound.length} consumer${stream.outbound.length !== 1 ? "s" : ""}`}
                   </div>
+                  {tracks && (
+                    <div className="stream-tracks" style={{ textAlign: "center", marginBottom: "1rem" }}>
+                      {tracks.map(formatTrack).join("  ·  ")}
+                    </div>
+                  )}
                   {allItems.length > 0 && renderStreamTable(allItems, stream.inbound)}
                 </div>
               );

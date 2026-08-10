@@ -5,6 +5,20 @@ export interface PushTarget {
   streamKey: string;
 }
 
+export interface TrackCodecProps {
+  width?: number;
+  height?: number;
+  profile?: string;
+  level?: string;
+  sampleRate?: number;
+  channelCount?: number;
+}
+
+export interface Track {
+  codec: string;
+  codecProps?: TrackCodecProps;
+}
+
 export interface Application {
   name: string;
   isProtected: boolean;
@@ -76,6 +90,7 @@ export interface LogicalStreamItem {
   startedAt: number;
   inbound: StreamHealthItem | null;
   outbound: StreamHealthItem[];
+  tracks?: Track[];
 }
 
 export interface HealthSnapshot {

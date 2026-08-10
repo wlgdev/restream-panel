@@ -54,3 +54,20 @@ export interface OperationResult<T = void> {
   data?: T;
   error?: string;
 }
+
+// Codec properties of a mediamtx path track (from GET /v3/paths/list -> items[].tracks2[]).
+// Video tracks carry width/height/profile/level; audio tracks carry sampleRate/channelCount.
+// All inner fields are optional — mediamtx emits an empty codecProps object for some codecs.
+export interface TrackCodecProps {
+  width?: number;
+  height?: number;
+  profile?: string;
+  level?: string;
+  sampleRate?: number;
+  channelCount?: number;
+}
+
+export interface Track {
+  codec: string;
+  codecProps?: TrackCodecProps;
+}

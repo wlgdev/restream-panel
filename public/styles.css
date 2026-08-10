@@ -978,6 +978,14 @@ h1 {
   animation-delay: 0.1s;
 }
 
+.stream-tracks {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  opacity: 0.9;
+  letter-spacing: 0.02em;
+}
+
 /* Event Log */
 .event-log-card {
   padding: 1.5rem 1rem;

@@ -6,6 +6,8 @@ import { StreamMonitor } from "./services/streamMonitor";
 import { test_vk } from "../mocks/ss";
 import { SrtMonitor } from "./services/srtMonitor";
 import { srtAndForward1, srtAndForward2, srtAndForward3, srtAndForwardNull } from "../mocks/srt";
+import { pathes } from "../mocks/srt";
+import { PathInfoService } from "./services/pathInfoService";
 import { resolve, join } from "path";
 import { StreamEventLog } from "./services/streamEventLog";
 
@@ -13,19 +15,27 @@ const config = loadConfig();
 const nginxService = new NginxService();
 const isRunningFromSource = Bun.main.endsWith(".ts");
 const isLocalDevHost = config.ip === "localhost" || config.ip === "127.0.0.1";
+const useMockData = isRunningFromSource && isLocalDevHost;
 
 const sharedEventLog = new StreamEventLog();
 
+const pathInfoService = new PathInfoService({
+  useMockData,
+  mockOutput: pathes,
+});
+
 const srtMonitor = new SrtMonitor({
-  useMockData: isRunningFromSource && isLocalDevHost,
+  useMockData,
   mockOutputs: [srtAndForward1, srtAndForward2, srtAndForward3],
   eventLog: sharedEventLog,
+  pathInfoService,
 });
 const streamMonitor = new StreamMonitor({
-  useMockData: isRunningFromSource && isLocalDevHost,
+  useMockData,
   mockOutputs: [test_vk],
   forwardMapProvider: () => srtMonitor.getForwardMap(),
   eventLog: sharedEventLog,
+  pathInfoService,
 });
 streamMonitor.startBackgroundPolling();
 srtMonitor.startBackgroundPolling();

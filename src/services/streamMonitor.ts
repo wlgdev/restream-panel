@@ -2,6 +2,8 @@ import * as fs from "node:fs";
 import { RtmpTargetResolver, type ResolvedRtmpTarget } from "./rtmpTargetResolver";
 import { RTMP_MONITOR_INBOUND_PORTS } from "../core/constants";
 import { StreamEventLog } from "./streamEventLog";
+import type { Track } from "../core/types";
+import type { PathInfoService } from "./pathInfoService";
 
 export interface StreamMetrics {
   target: string;
@@ -41,6 +43,7 @@ export interface LogicalStream {
   startedAt: number;
   inbound: StreamMetrics | null;
   outbound: StreamMetrics[];
+  tracks?: Track[];
 }
 
 export interface StreamSnapshot {
@@ -91,6 +94,7 @@ interface StreamMonitorOptions {
   rtmpTargetResolver?: Pick<RtmpTargetResolver, "resolveTarget">;
   forwardMapProvider?: () => Map<string, string>;
   eventLog?: StreamEventLog;
+  pathInfoService?: PathInfoService;
 }
 
 interface ActiveStreamState {
@@ -135,6 +139,7 @@ export class StreamMonitor {
   private readonly rtmpTargetResolver: Pick<RtmpTargetResolver, "resolveTarget">;
   private readonly forwardMapProvider?: () => Map<string, string>;
   private readonly eventLog: StreamEventLog;
+  private readonly pathInfoService?: PathInfoService;
   private readonly lastKnownConnections = new Map<string, { target: string; streamId: string; peerIp: string | null; loggedStart?: boolean }>();
 
   // remoteAddr (ip:port) -> path, mirrored from SrtMonitor's forward map each tick so that
@@ -152,6 +157,7 @@ export class StreamMonitor {
     this.rtmpTargetResolver = options.rtmpTargetResolver ?? new RtmpTargetResolver();
     this.forwardMapProvider = options.forwardMapProvider;
     this.eventLog = options.eventLog ?? new StreamEventLog();
+    this.pathInfoService = options.pathInfoService;
   }
 
   public getEventsSince(since?: number) {
@@ -310,6 +316,7 @@ export class StreamMonitor {
       const data = this.parse(commandResult.stdout);
       await this.resolveRtmpTargets(data);
       this.assignStreams(data);
+      await this.ensurePathTracks(data);
       const visibleData = this.filterVisibleMetrics(data);
       const streams = this.buildLogicalStreams(visibleData);
 
@@ -723,6 +730,7 @@ export class StreamMonitor {
           startedAt: state?.startedAt ?? this.now(),
           inbound: null,
           outbound: [],
+          tracks: this.pathInfoService?.getTracks(metric.stream_id) ?? undefined,
         });
       }
 
@@ -739,6 +747,19 @@ export class StreamMonitor {
       const state = this.activeStreams.get(stream.id);
       return state?.loggedStart !== false;
     });
+  }
+
+  // Lazy-load mediamtx path tracks once per seen path. Triggered from collectOnce after
+  // stream assignment so logical streams (path-backed by mediamtx) can surface track info
+  // without a per-tick re-fetch of /v3/paths/list.
+  private async ensurePathTracks(metrics: StreamMetrics[]): Promise<void> {
+    if (!this.pathInfoService) return;
+    const paths = new Set<string>();
+    for (const metric of metrics) {
+      if (metric.stream_id) paths.add(metric.stream_id);
+    }
+    if (paths.size === 0) return;
+    await this.pathInfoService.ensurePaths(paths);
   }
 
   private calculateHealthAndSpeed(target: StreamMetrics) {

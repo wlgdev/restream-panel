@@ -1,4 +1,6 @@
 import { StreamEventLog } from "./streamEventLog";
+import type { Track } from "../core/types";
+import type { PathInfoService } from "./pathInfoService";
 
 export interface SrtMetrics {
   protocol: "SRT";
@@ -38,6 +40,7 @@ export interface LogicalSrtStream {
   startedAt: number;
   inbound: SrtMetrics | null;
   outbound: SrtMetrics[];
+  tracks?: Track[];
 }
 
 export interface SrtSnapshot {
@@ -111,6 +114,7 @@ interface SrtMonitorOptions {
   intervalMs?: number;
   clientTtlMs?: number;
   eventLog?: StreamEventLog;
+  pathInfoService?: PathInfoService;
 }
 
 export class SrtMonitor {
@@ -145,6 +149,7 @@ export class SrtMonitor {
   private readonly intervalMs: number;
   private readonly clientTtlMs: number;
   private readonly eventLog?: StreamEventLog;
+  private readonly pathInfoService?: PathInfoService;
 
   public constructor(options: SrtMonitorOptions = {}) {
     this.metricsFetcher = options.metricsFetcher ?? SrtMonitor.fetchMetrics;
@@ -154,6 +159,7 @@ export class SrtMonitor {
     this.intervalMs = options.intervalMs ?? 5000;
     this.clientTtlMs = options.clientTtlMs ?? 15000;
     this.eventLog = options.eventLog;
+    this.pathInfoService = options.pathInfoService;
   }
 
   public parse(output: string): RawSrtMetric[] {
@@ -283,6 +289,7 @@ export class SrtMonitor {
       const data = rawData.map((raw) => this.calculateHealth(raw));
       this.lastForwardMap = this.buildForwardMap(this.parseForwardDestinations(commandResult.stdout));
       this.syncActiveStreams(data);
+      await this.ensurePathTracks(data);
       const streams = this.buildLogicalStreams(data);
 
       this.lastSnapshot = {
@@ -615,6 +622,7 @@ export class SrtMonitor {
           startedAt: state?.startedAt ?? this.now(),
           inbound: null,
           outbound: [],
+          tracks: this.pathInfoService?.getTracks(metric.stream_id) ?? undefined,
         });
       }
 
@@ -627,6 +635,19 @@ export class SrtMonitor {
     }
 
     return [...streamMap.values()];
+  }
+
+  // Lazy-load mediamtx path tracks once per seen path. Triggered from collectOnce after new-stream
+  // detection so that logical streams (which carry the path as their id) can attach track info
+  // without a per-tick re-fetch of /v3/paths/list.
+  private async ensurePathTracks(metrics: SrtMetrics[]): Promise<void> {
+    if (!this.pathInfoService) return;
+    const paths = new Set<string>();
+    for (const metric of metrics) {
+      if (metric.stream_id) paths.add(metric.stream_id);
+    }
+    if (paths.size === 0) return;
+    await this.pathInfoService.ensurePaths(paths);
   }
 
   private static async fetchMetrics(): Promise<CommandExecutionResult> {
