@@ -60,7 +60,7 @@ export interface AlertState {
 }
 
 export interface StreamHealthItem {
-  protocol?: "RTMP" | "RTMPS" | "SRT";
+  protocol?: "RTMP" | "RTMPS" | "SRT" | "SRTLA";
   target: string;
   stream_id?: string;
   health: number;

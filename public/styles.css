@@ -930,6 +930,12 @@ h1 {
   color: #5eead4;
 }
 
+.proto-srtla {
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.28);
+  color: #fcd34d;
+}
+
 .proto-rtmp {
   background: rgba(99, 102, 241, 0.14);
   border-color: rgba(99, 102, 241, 0.28);

@@ -178,10 +178,48 @@ srt_conns_ms_rtt{id="a9b0be6b-2fd4-4db3-8883-57fce50c14c4",path="vk",remoteAddr=
     expect(inbound?.stream_id).toBe("test");
     expect(inbound?.peer_ip).toBe("[::1]:50763");
 
-    // Forward data does NOT leak into the SRT metrics shown on the panel.
-    expect(snapshot.data.every((item) => item.protocol === "SRT")).toBe(true);
+    // The path matches an SRTLA group, so the inbound SRT connection is flagged SRTLA (an
+    // inbound-only SRT variant) rather than plain SRT. Forward data does not leak in.
+    expect(inbound?.protocol).toBe("SRTLA");
+    expect(snapshot.data.every((item) => item.protocol === "SRT" || item.protocol === "SRTLA")).toBe(true);
     expect(snapshot.streams).toHaveLength(1);
     expect(snapshot.streams[0]?.id).toBe("test");
+  });
+
+  test("flags an inbound SRT connection as SRTLA iff its path belongs to an SRTLA group", async () => {
+    const plain = new SrtMonitor({
+      metricsFetcher: async () => ({ success: true, stdout: srt1, stderr: "" }),
+    });
+    const plainSnapshot = await plain.collectOnce();
+    expect(plainSnapshot.data.find((item) => item.target === "INBOUND")?.protocol).toBe("SRT");
+
+    const srtla = new SrtMonitor({
+      metricsFetcher: async () => ({ success: true, stdout: srtAndForward1, stderr: "" }),
+    });
+    const srtlaSnapshot = await srtla.collectOnce();
+    expect(srtlaSnapshot.data.find((item) => item.target === "INBOUND")?.protocol).toBe("SRTLA");
+  });
+
+  test("never marks outbound SRT connections as SRTLA, even under an SRTLA path", async () => {
+    // SRTLA is inbound-only: a read (outbound) connection on the same path as an SRTLA group
+    // must stay plain SRT.
+    const stdout = `# SRT connections
+srt_conns{id="pub",path="test",remoteAddr="[::1]:5000",state="publish"} 1
+srt_conns_ms_rtt{id="pub",path="test",remoteAddr="[::1]:5000",state="publish"} 5
+srt_conns{id="rd",path="test",remoteAddr="[::1]:5001",state="read"} 1
+srt_conns_ms_rtt{id="rd",path="test",remoteAddr="[::1]:5001",state="read"} 5
+
+# SRTLA groups
+srtla_groups{id="grp",path="test"} 1
+`;
+
+    const monitor = new SrtMonitor({
+      metricsFetcher: async () => ({ success: true, stdout, stderr: "" }),
+    });
+    const snapshot = await monitor.collectOnce();
+
+    expect(snapshot.data.find((item) => item.target === "INBOUND")?.protocol).toBe("SRTLA");
+    expect(snapshot.data.find((item) => item.target === "OUTBOUND")?.protocol).toBe("SRT");
   });
 
   test("keeps the forward map empty when the only forward destination is idle", async () => {

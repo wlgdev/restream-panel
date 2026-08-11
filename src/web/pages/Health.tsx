@@ -348,7 +348,10 @@ export function Health() {
         </thead>
         <tbody>
           {items.map((item, idx) => {
-            const isSrt = item.protocol === "SRT";
+            // SRTLA is an inbound-only variant of SRT; it shares SRT's connection metrics and
+            // rendering path (RTT/jitter, buffer ms, loss/retrans columns), only the proto
+            // badge differs. Treat both protocols as SRT for table rendering decisions.
+            const isSrt = item.protocol === "SRT" || item.protocol === "SRTLA";
             const protocol = item.protocol ?? "RTMP";
             const bufferMs = item.target === "INBOUND" ? (item.recv_buffer_ms ?? 0) : (item.send_buffer_ms ?? 0);
             const queueValue = item.target === "INBOUND" ? item.recv_q : item.send_q;

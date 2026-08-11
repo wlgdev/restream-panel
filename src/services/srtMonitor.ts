@@ -3,7 +3,7 @@ import type { Track } from "../core/types";
 import type { PathInfoService } from "./pathInfoService";
 
 export interface SrtMetrics {
-  protocol: "SRT";
+  protocol: "SRT" | "SRTLA";
   target: "INBOUND" | "OUTBOUND";
   stream_id?: string;
   peer_ip: string | null;
@@ -204,6 +204,25 @@ export class SrtMonitor {
     return [...connections.values()];
   }
 
+  // Collect the set of paths backed by an SRTLA group. mediamtx emits a `path` label on the
+  // base `srtla_groups{...}` counter for each SRTLA group; any SRT connection whose path
+  // matches one of these is an SRTLA connection (a sub-variant of SRT), not plain SRT.
+  // Derivatives like `srtla_groups_conns_active{...}` share the prefix but carry no new path,
+  // and the bare `srtla_groups 0` (no labels) carries none at all, so pinning the regex to
+  // `srtla_groups{` skips both.
+  public parseSrtlaPaths(output: string): Set<string> {
+    const paths = new Set<string>();
+
+    for (const line of output.split("\n")) {
+      const match = line.match(/^srtla_groups\{[^}]*path="([^"]+)"[^}]*\}\s+\d+/);
+      if (match) {
+        paths.add(match[1]!);
+      }
+    }
+
+    return paths;
+  }
+
   public parseForwardDestinations(output: string): ForwardDest[] {
     const dests = new Map<string, ForwardDest>();
 
@@ -286,7 +305,8 @@ export class SrtMonitor {
 
     try {
       const rawData = this.parse(commandResult.stdout);
-      const data = rawData.map((raw) => this.calculateHealth(raw));
+      const srtlaPaths = this.parseSrtlaPaths(commandResult.stdout);
+      const data = rawData.map((raw) => this.calculateHealth(raw, srtlaPaths));
       this.lastForwardMap = this.buildForwardMap(this.parseForwardDestinations(commandResult.stdout));
       this.syncActiveStreams(data);
       await this.ensurePathTracks(data);
@@ -439,7 +459,7 @@ export class SrtMonitor {
     }
   }
 
-  private calculateHealth(raw: RawSrtMetric): SrtMetrics {
+  private calculateHealth(raw: RawSrtMetric, srtlaPaths: Set<string>): SrtMetrics {
     const stateKey = raw.id;
     const prevState = this.states.get(raw.id);
     const wallClockNow = this.now();
@@ -568,8 +588,13 @@ export class SrtMonitor {
       timestamp: sampleTimestamp,
     });
 
+    // SRTLA is an inbound-only variant of SRT: mediamtx wraps a publisher's SRTLA bond as a
+    // regular SRT publish connection whose path matches an SRTLA group. Outbound (read) SRT
+    // connections never belong to an SRTLA group, so only mark inbound ones as SRTLA.
+    const isSrtla = isPublish && srtlaPaths.has(raw.path);
+
     return {
-      protocol: "SRT",
+      protocol: isSrtla ? "SRTLA" : "SRT",
       target: isPublish ? "INBOUND" : "OUTBOUND",
       stream_id: raw.path,
       peer_ip: raw.remoteAddr,
