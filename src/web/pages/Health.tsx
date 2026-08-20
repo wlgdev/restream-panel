@@ -333,7 +333,7 @@ export function Health() {
 
         const prevList = next[stream.id] || [];
         const updatedList = [...prevList, point];
-        next[stream.id] = updatedList.length > 720 ? updatedList.slice(updatedList.length - 720) : updatedList;
+        next[stream.id] = updatedList.length > 2880 ? updatedList.slice(updatedList.length - 2880) : updatedList;
       }
       return next;
     });

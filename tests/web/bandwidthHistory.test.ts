@@ -71,11 +71,11 @@ describe("Stream Bandwidth Chart Data Processing", () => {
     expect(point.outbounds["VK_185.100.10.5:1935"]).toBe(6480000);
   });
 
-  it("handles rolling buffer capacity limit correctly", () => {
-    const maxPoints = 720;
+  it("handles rolling buffer capacity limit correctly for 4 hours (2880 points)", () => {
+    const maxPoints = 2880;
     let list: BandwidthPoint[] = [];
 
-    for (let i = 0; i < 800; i++) {
+    for (let i = 0; i < 3000; i++) {
       const p: BandwidthPoint = {
         time: 1710000000 + i * 5,
         inboundBps: 5000000 + (i % 10) * 100000,
@@ -87,8 +87,8 @@ describe("Stream Bandwidth Chart Data Processing", () => {
       }
     }
 
-    expect(list.length).toBe(720);
-    expect(list[0].time).toBe(1710000000 + 80 * 5);
-    expect(list[list.length - 1].time).toBe(1710000000 + 799 * 5);
+    expect(list.length).toBe(2880);
+    expect(list[0].time).toBe(1710000000 + 120 * 5);
+    expect(list[list.length - 1].time).toBe(1710000000 + 2999 * 5);
   });
 });

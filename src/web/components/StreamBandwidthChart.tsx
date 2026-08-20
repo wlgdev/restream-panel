@@ -453,6 +453,13 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
             </button>
             <button
               type="button"
+              className={`chart-btn ${windowSec === 3600 ? "active" : ""}`}
+              onClick={() => handleWindowSelect(3600)}
+            >
+              1h
+            </button>
+            <button
+              type="button"
               className={`chart-btn ${windowSec === "all" ? "active" : ""}`}
               onClick={() => handleWindowSelect("all")}
             >
