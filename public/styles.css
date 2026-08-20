@@ -1060,6 +1060,268 @@ h1 {
   color: var(--warning);
 }
 
+/* uPlot Base & Bandwidth Chart */
+.uplot, .uplot *, .uplot *::before, .uplot *::after {
+  box-sizing: border-box;
+}
+
+.uplot {
+  font-family: var(--font-mono);
+  line-height: 1.5;
+  width: 100%;
+  position: relative;
+  user-select: none;
+}
+
+.u-wrap {
+  position: relative;
+  user-select: none;
+}
+
+.u-over, .u-under {
+  position: absolute;
+}
+
+.u-under {
+  overflow: hidden;
+}
+
+.uplot canvas {
+  display: block;
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.u-axis {
+  position: absolute;
+}
+
+.u-select {
+  background: rgba(0, 255, 136, 0.12);
+  border-left: 1px solid var(--accent);
+  border-right: 1px solid var(--accent);
+  position: absolute;
+  pointer-events: none;
+}
+
+.u-cursor-x, .u-cursor-y {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.u-hz .u-cursor-x, .u-vt .u-cursor-y {
+  height: 100%;
+  border-right: 1px dashed rgba(255, 255, 255, 0.2);
+}
+
+.u-hz .u-cursor-y, .u-vt .u-cursor-x {
+  width: 100%;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.15);
+}
+
+.u-cursor-pt {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 50%;
+  border: 0 solid;
+  pointer-events: none;
+  will-change: transform;
+  background-clip: padding-box !important;
+}
+
+.u-axis.u-off, .u-select.u-off, .u-cursor-x.u-off, .u-cursor-y.u-off, .u-cursor-pt.u-off {
+  display: none;
+}
+
+.stream-chart-card {
+  margin-left: 1rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  position: relative;
+}
+
+.stream-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.stream-chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.stream-chart-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.stream-chart-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.stream-chart-legend-label {
+  color: var(--text-main);
+  opacity: 0.85;
+}
+
+.stream-chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chart-btn-group {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-void);
+}
+
+.chart-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.chart-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.chart-btn.active {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.chart-live-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.chart-live-btn.live-active {
+  background: rgba(0, 255, 136, 0.12);
+  border-color: rgba(0, 255, 136, 0.3);
+  color: var(--accent);
+}
+
+.chart-live-btn.live-paused {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: var(--warning);
+}
+
+.chart-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.chart-live-btn.live-active .chart-live-dot {
+  animation: pulse 2s infinite;
+}
+
+.stream-chart-plot-wrap {
+  position: relative;
+  width: 100%;
+  min-height: 180px;
+}
+
+.uplot-wrapper {
+  width: 100%;
+  height: 180px;
+}
+
+.chart-tooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 10;
+  background: rgba(18, 18, 20, 0.94);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  will-change: transform;
+  min-width: 150px;
+}
+
+.chart-tooltip-time {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  margin-bottom: 0.35rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 0.2rem;
+}
+
+.chart-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+  white-space: nowrap;
+}
+
+.chart-tooltip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.chart-tooltip-name {
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.chart-tooltip-val {
+  color: var(--text-main);
+  font-weight: 600;
+  text-align: right;
+}
+
 /* Responsive */
 @media (max-width: 640px) {
   .header-actions span {
@@ -1091,4 +1353,12 @@ h1 {
   .health-table-wrap {
     margin-left: 0;
   }
+  .stream-chart-card {
+    margin-left: 0;
+  }
+  .stream-chart-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
+

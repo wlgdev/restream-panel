@@ -8,6 +8,7 @@ import type {
   Track,
 } from "../types";
 import * as api from "../api";
+import { StreamBandwidthChart, type BandwidthPoint } from "../components/StreamBandwidthChart";
 
 export function Health() {
   const [snapshot, setSnapshot] = useState<CombinedHealthSnapshot | null>(null);
@@ -16,6 +17,7 @@ export function Health() {
     () => globalThis.crypto?.randomUUID?.() ?? "health-" + Math.random().toString(36).slice(2),
   );
   const [loading, setLoading] = useState(true);
+  const [bandwidthHistory, setBandwidthHistory] = useState<Record<string, BandwidthPoint[]>>({});
 
   const [eventLog, setEventLog] = useState<StreamEvent[]>([]);
   const lastSeqRef = useRef<number | undefined>(undefined);
@@ -309,6 +311,34 @@ export function Health() {
     return Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id));
   }, [snapshots]);
 
+  useEffect(() => {
+    if (combinedStreams.length === 0) return;
+
+    const nowSec = Math.floor(Date.now() / 1000);
+
+    setBandwidthHistory((prev) => {
+      const next = { ...prev };
+      for (const stream of combinedStreams) {
+        const outboundsRecord: Record<string, number> = {};
+        for (const out of stream.outbound) {
+          const key = `${out.target}_${out.peer_ip || out.protocol || "dest"}`;
+          outboundsRecord[key] = out.tx_bps;
+        }
+
+        const point: BandwidthPoint = {
+          time: nowSec,
+          inboundBps: stream.inbound ? stream.inbound.rx_bps : null,
+          outbounds: outboundsRecord,
+        };
+
+        const prevList = next[stream.id] || [];
+        const updatedList = [...prevList, point];
+        next[stream.id] = updatedList.length > 720 ? updatedList.slice(updatedList.length - 720) : updatedList;
+      }
+      return next;
+    });
+  }, [combinedStreams]);
+
   const totalConnections = (snapshots.rtmp?.data.length ?? 0) + (snapshots.srt?.data.length ?? 0);
   const totalStreams = (snapshots.rtmp?.streams.length ?? 0) + (snapshots.srt?.streams.length ?? 0);
 
@@ -506,6 +536,12 @@ export function Health() {
                     </div>
                   )}
                   {allItems.length > 0 && renderStreamTable(allItems, stream.inbound)}
+                  <StreamBandwidthChart
+                    streamId={stream.id}
+                    history={bandwidthHistory[stream.id] || []}
+                    inbound={stream.inbound}
+                    outbound={stream.outbound}
+                  />
                 </div>
               );
             })}
