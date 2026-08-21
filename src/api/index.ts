@@ -67,14 +67,17 @@ export function createApiServer(
       const clientId =
         typeof query.client === "string" && query.client.length > 0 ? query.client : "anonymous-health-client";
       await Promise.all([streamMonitor.touchClient(clientId), srtMonitor.touchClient(clientId)]);
+      const bwSince = typeof query.bwSince === "string" ? parseInt(query.bwSince, 10) : undefined;
       return {
         rtmp: streamMonitor.getSnapshot(),
         srt: srtMonitor.getSnapshot(),
         events: streamMonitor.getEventsSince(
           typeof query.since === "string" ? parseInt(query.since, 10) : undefined
         ),
+        bandwidth: streamMonitor.getBandwidthSince(bwSince),
       };
     })
+
     .post("/api/health/streams/disconnect", ({ query }) => {
       if (typeof query.client === "string" && query.client.length > 0) {
         streamMonitor.disconnectClient(query.client);

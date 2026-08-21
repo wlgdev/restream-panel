@@ -97,10 +97,13 @@ export async function reloadNginx() {
   });
 }
 
-export async function getStreams(clientId: string, since?: number) {
+export async function getStreams(clientId: string, since?: number, bwSince?: number) {
   let url = `${API_BASE}/health/streams?client=${encodeURIComponent(clientId)}`;
   if (since !== undefined) {
     url += `&since=${since}`;
+  }
+  if (bwSince !== undefined) {
+    url += `&bwSince=${bwSince}`;
   }
   const response = await fetch(url, {
     cache: "no-store",
@@ -110,6 +113,7 @@ export async function getStreams(clientId: string, since?: number) {
   });
   return response.json() as Promise<CombinedHealthSnapshot>;
 }
+
 
 export async function disconnectClient(clientId: string) {
   return fetch(`${API_BASE}/health/streams/disconnect?client=${encodeURIComponent(clientId)}`, {

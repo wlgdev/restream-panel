@@ -125,8 +125,16 @@ export interface StreamEvent {
   metrics?: EventTargetMetrics;
 }
 
+export interface BandwidthPoint {
+  time: number;
+  inboundBps: number | null;
+  outbounds: Record<string, number>;
+}
+
 export interface CombinedHealthSnapshot {
   rtmp: HealthSnapshot;
   srt: HealthSnapshot;
   events: StreamEvent[];
+  bandwidth?: Record<string, BandwidthPoint[]>;
 }
+

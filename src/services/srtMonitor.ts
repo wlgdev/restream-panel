@@ -1,5 +1,7 @@
 import { StreamEventLog } from "./streamEventLog";
+import { StreamBandwidthLog } from "./streamBandwidthLog";
 import type { Track } from "../core/types";
+
 import type { PathInfoService } from "./pathInfoService";
 
 export interface SrtMetrics {
@@ -114,6 +116,7 @@ interface SrtMonitorOptions {
   intervalMs?: number;
   clientTtlMs?: number;
   eventLog?: StreamEventLog;
+  streamBandwidthLog?: StreamBandwidthLog;
   pathInfoService?: PathInfoService;
 }
 
@@ -149,6 +152,7 @@ export class SrtMonitor {
   private readonly intervalMs: number;
   private readonly clientTtlMs: number;
   private readonly eventLog?: StreamEventLog;
+  private readonly streamBandwidthLog?: StreamBandwidthLog;
   private readonly pathInfoService?: PathInfoService;
 
   public constructor(options: SrtMonitorOptions = {}) {
@@ -159,8 +163,14 @@ export class SrtMonitor {
     this.intervalMs = options.intervalMs ?? 5000;
     this.clientTtlMs = options.clientTtlMs ?? 15000;
     this.eventLog = options.eventLog;
+    this.streamBandwidthLog = options.streamBandwidthLog;
     this.pathInfoService = options.pathInfoService;
   }
+
+  public getBandwidthSince(since?: number) {
+    return this.streamBandwidthLog?.getSince(since) ?? {};
+  }
+
 
   public parse(output: string): RawSrtMetric[] {
     const lines = output.split("\n");
@@ -311,6 +321,8 @@ export class SrtMonitor {
       this.syncActiveStreams(data);
       await this.ensurePathTracks(data);
       const streams = this.buildLogicalStreams(data);
+      this.streamBandwidthLog?.recordStreams(streams, Math.floor(this.now() / 1000));
+
 
       this.lastSnapshot = {
         success: true,

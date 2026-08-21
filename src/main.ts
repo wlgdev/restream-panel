@@ -10,6 +10,7 @@ import { pathes } from "../mocks/srt";
 import { PathInfoService } from "./services/pathInfoService";
 import { resolve, join } from "path";
 import { StreamEventLog } from "./services/streamEventLog";
+import { StreamBandwidthLog } from "./services/streamBandwidthLog";
 
 const config = loadConfig();
 const nginxService = new NginxService();
@@ -18,6 +19,7 @@ const isLocalDevHost = config.ip === "localhost" || config.ip === "127.0.0.1";
 const useMockData = isRunningFromSource && isLocalDevHost;
 
 const sharedEventLog = new StreamEventLog();
+const sharedBandwidthLog = new StreamBandwidthLog();
 
 const pathInfoService = new PathInfoService({
   useMockData,
@@ -28,6 +30,7 @@ const srtMonitor = new SrtMonitor({
   useMockData,
   mockOutputs: [srtAndForward1, srtAndForward2, srtAndForward3],
   eventLog: sharedEventLog,
+  streamBandwidthLog: sharedBandwidthLog,
   pathInfoService,
 });
 const streamMonitor = new StreamMonitor({
@@ -35,8 +38,10 @@ const streamMonitor = new StreamMonitor({
   mockOutputs: [test_vk],
   forwardMapProvider: () => srtMonitor.getForwardMap(),
   eventLog: sharedEventLog,
+  streamBandwidthLog: sharedBandwidthLog,
   pathInfoService,
 });
+
 streamMonitor.startBackgroundPolling();
 srtMonitor.startBackgroundPolling();
 // Resolve absolute path to avoid ambiguity (e.g. running from dist/ but thinking relative to src/)

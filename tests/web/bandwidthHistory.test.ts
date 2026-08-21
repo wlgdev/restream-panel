@@ -91,4 +91,26 @@ describe("Stream Bandwidth Chart Data Processing", () => {
     expect(list[0].time).toBe(1710000000 + 120 * 5);
     expect(list[list.length - 1].time).toBe(1710000000 + 2999 * 5);
   });
+
+  it("merges catch-up points without duplicates", () => {
+    const initialList: BandwidthPoint[] = [
+      { time: 100, inboundBps: 5000, outbounds: {} },
+      { time: 105, inboundBps: 5000, outbounds: {} },
+      { time: 110, inboundBps: 5000, outbounds: {} },
+    ];
+
+    const incomingCatchUp: BandwidthPoint[] = [
+      { time: 110, inboundBps: 5000, outbounds: {} }, // duplicate
+      { time: 115, inboundBps: 5000, outbounds: {} },
+      { time: 120, inboundBps: 5000, outbounds: {} },
+    ];
+
+    const existingTimes = new Set(initialList.map((p) => p.time));
+    const newPoints = incomingCatchUp.filter((p) => !existingTimes.has(p.time));
+    const merged = [...initialList, ...newPoints].sort((a, b) => a.time - b.time);
+
+    expect(merged.length).toBe(5);
+    expect(merged.map((p) => p.time)).toEqual([100, 105, 110, 115, 120]);
+  });
 });
+

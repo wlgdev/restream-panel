@@ -21,6 +21,7 @@ export function Health() {
 
   const [eventLog, setEventLog] = useState<StreamEvent[]>([]);
   const lastSeqRef = useRef<number | undefined>(undefined);
+  const lastBwTimeRef = useRef<number | undefined>(undefined);
   const logContainerRef = useRef<HTMLDivElement>(null);
   const isStickyRef = useRef(true);
 
@@ -29,10 +30,42 @@ export function Health() {
 
     const fetchHealth = async () => {
       try {
-        const data = await api.getStreams(clientId, lastSeqRef.current);
+        const data = await api.getStreams(clientId, lastSeqRef.current, lastBwTimeRef.current);
         if (!mounted) return;
 
         setSnapshot(data);
+
+        if (data.bandwidth) {
+          setBandwidthHistory((prev) => {
+            const next = { ...prev };
+            let maxTime = lastBwTimeRef.current ?? 0;
+
+            for (const [streamId, points] of Object.entries(data.bandwidth)) {
+              if (!points || points.length === 0) continue;
+
+              const prevList = next[streamId] || [];
+              const existingTimes = new Set(prevList.map((p) => p.time));
+              const newPoints = points.filter((p) => !existingTimes.has(p.time));
+
+              if (newPoints.length > 0) {
+                const combined = [...prevList, ...newPoints].sort((a, b) => a.time - b.time);
+                next[streamId] = combined.length > 2880 ? combined.slice(combined.length - 2880) : combined;
+              }
+
+              for (const p of points) {
+                if (p.time > maxTime) {
+                  maxTime = p.time;
+                }
+              }
+            }
+
+            if (maxTime > 0) {
+              lastBwTimeRef.current = maxTime;
+            }
+
+            return next;
+          });
+        }
 
         if (data.events && data.events.length > 0) {
           setEventLog((prev) => {
@@ -66,12 +99,22 @@ export function Health() {
     fetchHealth();
     const interval = setInterval(fetchHealth, 5000);
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        fetchHealth();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
       mounted = false;
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       api.disconnectClient(clientId).catch(console.error);
     };
   }, [clientId]);
+
 
   const formatBytes = (value: number) => {
     if (!Number.isFinite(value) || value <= 0) return "0 B";
@@ -311,35 +354,8 @@ export function Health() {
     return Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id));
   }, [snapshots]);
 
-  useEffect(() => {
-    if (combinedStreams.length === 0) return;
-
-    const nowSec = Math.floor(Date.now() / 1000);
-
-    setBandwidthHistory((prev) => {
-      const next = { ...prev };
-      for (const stream of combinedStreams) {
-        const outboundsRecord: Record<string, number> = {};
-        for (const out of stream.outbound) {
-          const key = `${out.target}_${out.peer_ip || out.protocol || "dest"}`;
-          outboundsRecord[key] = out.tx_bps;
-        }
-
-        const point: BandwidthPoint = {
-          time: nowSec,
-          inboundBps: stream.inbound ? stream.inbound.rx_bps : null,
-          outbounds: outboundsRecord,
-        };
-
-        const prevList = next[stream.id] || [];
-        const updatedList = [...prevList, point];
-        next[stream.id] = updatedList.length > 2880 ? updatedList.slice(updatedList.length - 2880) : updatedList;
-      }
-      return next;
-    });
-  }, [combinedStreams]);
-
   const totalConnections = (snapshots.rtmp?.data.length ?? 0) + (snapshots.srt?.data.length ?? 0);
+
   const totalStreams = (snapshots.rtmp?.streams.length ?? 0) + (snapshots.srt?.streams.length ?? 0);
 
   const updatedAt = [snapshots.rtmp?.timestamp, snapshots.srt?.timestamp]

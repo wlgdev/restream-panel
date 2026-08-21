@@ -2,8 +2,10 @@ import * as fs from "node:fs";
 import { RtmpTargetResolver, type ResolvedRtmpTarget } from "./rtmpTargetResolver";
 import { RTMP_MONITOR_INBOUND_PORTS } from "../core/constants";
 import { StreamEventLog } from "./streamEventLog";
+import { StreamBandwidthLog } from "./streamBandwidthLog";
 import type { Track } from "../core/types";
 import type { PathInfoService } from "./pathInfoService";
+
 
 export interface StreamMetrics {
   target: string;
@@ -94,6 +96,7 @@ interface StreamMonitorOptions {
   rtmpTargetResolver?: Pick<RtmpTargetResolver, "resolveTarget">;
   forwardMapProvider?: () => Map<string, string>;
   eventLog?: StreamEventLog;
+  streamBandwidthLog?: StreamBandwidthLog;
   pathInfoService?: PathInfoService;
 }
 
@@ -139,6 +142,7 @@ export class StreamMonitor {
   private readonly rtmpTargetResolver: Pick<RtmpTargetResolver, "resolveTarget">;
   private readonly forwardMapProvider?: () => Map<string, string>;
   private readonly eventLog: StreamEventLog;
+  private readonly streamBandwidthLog?: StreamBandwidthLog;
   private readonly pathInfoService?: PathInfoService;
   private readonly lastKnownConnections = new Map<string, { target: string; streamId: string; peerIp: string | null; loggedStart?: boolean }>();
 
@@ -157,12 +161,18 @@ export class StreamMonitor {
     this.rtmpTargetResolver = options.rtmpTargetResolver ?? new RtmpTargetResolver();
     this.forwardMapProvider = options.forwardMapProvider;
     this.eventLog = options.eventLog ?? new StreamEventLog();
+    this.streamBandwidthLog = options.streamBandwidthLog;
     this.pathInfoService = options.pathInfoService;
   }
 
   public getEventsSince(since?: number) {
     return this.eventLog.getSince(since);
   }
+
+  public getBandwidthSince(since?: number) {
+    return this.streamBandwidthLog?.getSince(since) ?? {};
+  }
+
 
   public parse(ssOutput: string): StreamMetrics[] {
     const lines = ssOutput.split("\n");
@@ -319,6 +329,8 @@ export class StreamMonitor {
       await this.ensurePathTracks(data);
       const visibleData = this.filterVisibleMetrics(data);
       const streams = this.buildLogicalStreams(visibleData);
+      this.streamBandwidthLog?.recordStreams(streams, Math.floor(this.now() / 1000));
+
 
       for (const metric of visibleData) {
         if (metric.target !== "INBOUND" && metric.stream_id && metric.health < 90 && !metric.is_first_tick) {
