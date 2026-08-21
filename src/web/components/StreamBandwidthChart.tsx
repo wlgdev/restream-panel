@@ -100,29 +100,25 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
 
     const hasInbound = inbound || history.some((h) => h.inboundBps !== null);
     if (hasInbound) {
+      const peerLabel = inbound?.peer_ip ? ` (${inbound.peer_ip})` : "";
       list.push({
         key: "inbound",
-        label: "Inbound",
+        label: `Inbound${peerLabel}`,
         target: "INBOUND",
         color: getTargetColor("INBOUND"),
       });
       keysSeen.add("inbound");
     }
 
-    const outboundTargetCounts = new Map<string, number>();
-    for (const item of outbound) {
-      outboundTargetCounts.set(item.target, (outboundTargetCounts.get(item.target) ?? 0) + 1);
-    }
-
     for (const item of outbound) {
       const key = `${item.target}_${item.peer_ip || item.protocol || "dest"}`;
       if (!keysSeen.has(key)) {
         keysSeen.add(key);
-        const count = outboundTargetCounts.get(item.target) ?? 1;
-        const disambiguation = count > 1 && item.peer_ip ? ` (${item.peer_ip.split(":").pop()})` : "";
+        const peer = item.peer_ip || (item.protocol && item.protocol !== "RTMP" ? item.protocol : "");
+        const peerLabel = peer ? ` (${peer})` : "";
         list.push({
           key,
-          label: `${targetLabel(item.target)}${disambiguation}`,
+          label: `${targetLabel(item.target)}${peerLabel}`,
           target: item.target,
           color: getTargetColor(item.target),
         });
@@ -133,11 +129,13 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
       for (const key of Object.keys(point.outbounds)) {
         if (!keysSeen.has(key)) {
           keysSeen.add(key);
-          const parts = key.split("_");
-          const target = parts[0] || "OUTBOUND";
+          const underscoreIdx = key.indexOf("_");
+          const target = underscoreIdx !== -1 ? key.slice(0, underscoreIdx) : key;
+          const peer = underscoreIdx !== -1 ? key.slice(underscoreIdx + 1) : "";
+          const peerLabel = peer && peer !== "dest" && peer !== "RTMP" ? ` (${peer})` : "";
           list.push({
             key,
-            label: targetLabel(target),
+            label: `${targetLabel(target)}${peerLabel}`,
             target,
             color: getTargetColor(target),
           });
@@ -147,6 +145,7 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
 
     return list;
   }, [inbound, outbound, history]);
+
 
   const seriesMetaRef = useRef(seriesMetaList);
   seriesMetaRef.current = seriesMetaList;
@@ -279,6 +278,7 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
             for (let i = 0; i < currentSeries.length; i++) {
               const s = currentSeries[i]!;
               const val = currentData[i + 1]?.[idx];
+              if (val === null || val === undefined) continue;
               itemsHtml += `
                 <div class="chart-tooltip-row">
                   <span class="chart-tooltip-dot" style="background-color: ${s.color};"></span>
@@ -288,11 +288,17 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
               `;
             }
 
+            if (!itemsHtml) {
+              tooltip.style.display = "none";
+              return;
+            }
+
             tooltip.innerHTML = `
               <div class="chart-tooltip-time">${formatTime(timestamp)}</div>
               ${itemsHtml}
             `;
             tooltip.style.display = "block";
+
 
             const tooltipWidth = tooltip.offsetWidth || 160;
             const plotWidth = u.width;
@@ -412,16 +418,8 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
   return (
     <div className="stream-chart-card" ref={containerRef}>
       <div className="stream-chart-header">
-        <div className="stream-chart-legend">
-          {seriesMetaList.map((s) => (
-            <div key={s.key} className="stream-chart-legend-item">
-              <span className="stream-chart-legend-dot" style={{ backgroundColor: s.color }}></span>
-              <span className="stream-chart-legend-label">{s.label}</span>
-            </div>
-          ))}
-        </div>
-
         <div className="stream-chart-controls">
+
           <div className="chart-btn-group">
             <button
               type="button"

@@ -1150,12 +1150,13 @@ h1 {
 
 .stream-chart-header {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   margin-bottom: 0.5rem;
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+
 
 .stream-chart-legend {
   display: flex;
