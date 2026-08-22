@@ -19,6 +19,14 @@ import { SrtMonitor } from "../../src/services/srtMonitor";
 const extractStdout = (sample: string | { stdout: string; elapsedMs?: number }): string =>
   typeof sample === "string" ? sample : sample.stdout;
 
+// Direct-to-mediamtx deployment: the publisher's accepted socket belongs to the shared
+// mediamtx process and its peer is an IPv4-mapped address on an IPv6 listener — the exact
+// shape ss emits for an RTMP publish into a monitored inbound port.
+const mediamtxPublisherSs = `State             Recv-Q              Send-Q                          Local Address:Port                              Peer Address:Port              Process
+ESTAB             0                   5                     [::ffff:172.104.94.183]:1935                            [::ffff:109.63.131.27]:58938              users:(("mediamtx",pid=73286,fd=12)) timer:(on,300ms,0)
+         ts sack ecn ecnseen cubic wscale:5,7 rto:488 rtt:287.889/0.443 ato:40 mss:1448 pmtu:1500 rcvmss:1448 advmss:1448 cwnd:10 bytes_sent:3784 bytes_acked:3779 bytes_received:6251433 segs_out:1924 segs_in:4724 data_segs_out:72 data_segs_in:4701 send 402377bps lastsnd:188 lastrcv:20 lastack:152 pacing_rate 804752bps delivery_rate 200048bps delivered:72 app_limited busy:17732ms unacked:1 rcv_rtt:299 rcv_space:185895 rcv_ssthresh:590832 minrtt:286.582
+`;
+
 const extractTwitchBytesSent = (sample: string | { stdout: string; elapsedMs?: number }): number => {
   const ssOutput = extractStdout(sample);
   const lines = ssOutput.split("\n");
@@ -118,6 +126,35 @@ ESTAB             0                   0                     [::ffff:127.0.0.1]:9
 `);
 
     expect(metrics).toHaveLength(0);
+  });
+
+  test("classifies a publish-map-correlated direct-to-mediamtx publisher as INBOUND under its path", async () => {
+    const monitor = new StreamMonitor({
+      commandExecutor: () => ({ success: true, stdout: mediamtxPublisherSs, stderr: "" }),
+      publishMapProvider: () => new Map([["109.63.131.27:58938", "cloudru"]]),
+    });
+
+    // The publish map is mirrored per tick inside collectOnce, so classify through it.
+    const snapshot = await monitor.collectOnce();
+
+    expect(snapshot.data).toHaveLength(1);
+    expect(snapshot.data[0]).toMatchObject({
+      target: "INBOUND",
+      stream_id: "cloudru",
+      local_ip: "[::ffff:172.104.94.183]:1935",
+      peer_ip: "[::ffff:109.63.131.27]:58938",
+      pid: 73286,
+    });
+  });
+
+  test("keeps an uncorrelated direct-to-mediamtx publisher as UNKNOWN without a stream id", () => {
+    const monitor = new StreamMonitor();
+
+    const metrics = monitor.parse(mediamtxPublisherSs);
+
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0]?.target).toBe("UNKNOWN");
+    expect(metrics[0]?.stream_id).toBeUndefined();
   });
 
   test("should drop internal mediamtx<->ffmpeg loopback relay sockets (both directions)", () => {
@@ -457,6 +494,95 @@ ESTAB             0                   0                                194.5.78.
     expect(snapshot.success).toBe(true);
     expect(snapshot.data.map((item) => item.target)).toEqual(["YOUTUBE", "INBOUND"]);
     expect(snapshot.streams).toHaveLength(1);
+  });
+
+  test("groups a direct mediamtx publisher into a logical stream named after its path", async () => {
+    const monitor = new StreamMonitor({
+      commandExecutor: () => ({ success: true, stdout: mediamtxPublisherSs, stderr: "" }),
+      publishMapProvider: () => new Map([["109.63.131.27:58938", "cloudru"]]),
+    });
+
+    const snapshot = await monitor.collectOnce();
+
+    expect(snapshot.data).toHaveLength(1);
+    expect(snapshot.data[0]).toMatchObject({
+      target: "INBOUND",
+      stream_id: "cloudru",
+      peer_ip: "[::ffff:109.63.131.27]:58938",
+      bytes_received: 6251433,
+    });
+    expect(snapshot.streams).toHaveLength(1);
+    expect(snapshot.streams[0]?.id).toBe("cloudru");
+    expect(snapshot.streams[0]?.inbound?.peer_ip).toBe("[::ffff:109.63.131.27]:58938");
+    // Confirmed on the first tick (enough payload bytes) → stream_start fires under the path id.
+    expect(monitor.getEventsSince().map((event) => event.type)).toEqual(["stream_start"]);
+    expect(monitor.getEventsSince()[0]?.streamId).toBe("cloudru");
+  });
+
+  test("emits stream_end under the path id when the direct mediamtx publisher disconnects", async () => {
+    let currentOutput = mediamtxPublisherSs;
+    const monitor = new StreamMonitor({
+      commandExecutor: () => ({ success: true, stdout: currentOutput, stderr: "" }),
+      publishMapProvider: () => new Map([["109.63.131.27:58938", "cloudru"]]),
+    });
+
+    await monitor.collectOnce();
+    currentOutput = "";
+    await monitor.collectOnce();
+
+    const events = monitor.getEventsSince();
+    expect(events.map((event) => event.type)).toEqual(["stream_start", "stream_end"]);
+    expect(events.every((event) => event.streamId === "cloudru")).toBe(true);
+  });
+
+  test("correlates a direct mediamtx publisher to an SRT consumer of the same path across monitors", async () => {
+    // Mirrors the reported scenario: publisher pushes RTMP straight into mediamtx while a
+    // third-party client pulls the same path via SRT. SrtMonitor owns the mediamtx metrics
+    // payload carrying both rtmp_conns and srt_conns sections.
+    const metricsPayload = `# RTMP connections
+rtmp_conns{id="pub",path="cloudru",remoteAddr="109.63.131.27:58938",state="publish"} 1
+
+# SRT connections
+srt_conns{id="rd",path="cloudru",remoteAddr="213.171.28.227:44785",state="read"} 1
+srt_conns_ms_rtt{id="rd",path="cloudru",remoteAddr="213.171.28.227:44785",state="read"} 272.865973768724
+`;
+
+    const srtMonitor = new SrtMonitor({
+      metricsFetcher: async () => ({ success: true, stdout: metricsPayload, stderr: "" }),
+    });
+    await srtMonitor.collectOnce();
+    expect(srtMonitor.getPublishMap().get("109.63.131.27:58938")).toBe("cloudru");
+
+    const streamMonitor = new StreamMonitor({
+      commandExecutor: () => ({ success: true, stdout: mediamtxPublisherSs, stderr: "" }),
+      forwardMapProvider: () => srtMonitor.getForwardMap(),
+      publishMapProvider: () => srtMonitor.getPublishMap(),
+    });
+    const snapshot = await streamMonitor.collectOnce();
+
+    // The RTMP publisher lands in the logical stream keyed by the path — the same id the UI
+    // merges with the SRT reader card.
+    expect(snapshot.streams).toHaveLength(1);
+    expect(snapshot.streams[0]?.id).toBe("cloudru");
+    expect(snapshot.streams[0]?.inbound?.target).toBe("INBOUND");
+    expect(snapshot.data.every((metric) => metric.stream_id === "cloudru")).toBe(true);
+    expect(srtMonitor.getSnapshot().streams.some((stream) => stream.id === "cloudru")).toBe(true);
+  });
+
+  test("holds an uncorrelated mediamtx listener socket out of unrelated logical streams", async () => {
+    // Before the publish map learns the peer (monitor restart race), the socket must stay
+    // unassociated rather than grab an unrelated stream's time-window slot.
+    const monitor = new StreamMonitor({
+      commandExecutor: () => ({ success: true, stdout: mediamtxPublisherSs, stderr: "" }),
+    });
+
+    const snapshot = await monitor.collectOnce();
+
+    expect(snapshot.data).toHaveLength(1);
+    expect(snapshot.data[0]?.target).toBe("UNKNOWN");
+    expect(snapshot.data[0]?.stream_id).toBeUndefined();
+    expect(snapshot.streams).toHaveLength(0);
+    expect(monitor.getEventsSince()).toEqual([]);
   });
 });
 

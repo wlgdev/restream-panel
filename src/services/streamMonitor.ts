@@ -95,6 +95,7 @@ interface StreamMonitorOptions {
   clientTtlMs?: number;
   rtmpTargetResolver?: Pick<RtmpTargetResolver, "resolveTarget">;
   forwardMapProvider?: () => Map<string, string>;
+  publishMapProvider?: () => Map<string, string>;
   eventLog?: StreamEventLog;
   streamBandwidthLog?: StreamBandwidthLog;
   pathInfoService?: PathInfoService;
@@ -141,6 +142,7 @@ export class StreamMonitor {
   private readonly clientTtlMs: number;
   private readonly rtmpTargetResolver: Pick<RtmpTargetResolver, "resolveTarget">;
   private readonly forwardMapProvider?: () => Map<string, string>;
+  private readonly publishMapProvider?: () => Map<string, string>;
   private readonly eventLog: StreamEventLog;
   private readonly streamBandwidthLog?: StreamBandwidthLog;
   private readonly pathInfoService?: PathInfoService;
@@ -149,6 +151,12 @@ export class StreamMonitor {
   // remoteAddr (ip:port) -> path, mirrored from SrtMonitor's forward map each tick so that
   // outbound mediamtx sockets (which carry no path of their own) can be correlated to a path.
   private lastForwardMap = new Map<string, string>();
+
+  // remoteAddr (ip:port) -> path for active publishers, mirrored from SrtMonitor's publish
+  // map each tick. In a direct-to-mediamtx deployment the publisher's socket belongs to the
+  // shared mediamtx process and ss cannot tell it apart from any other mediamtx socket; the
+  // rtmp_conns section identifies it by peer address and lets parse() classify it as INBOUND.
+  private lastPublishMap = new Map<string, string>();
 
   public constructor(options: StreamMonitorOptions = {}) {
     this.commandExecutor = options.commandExecutor ?? StreamMonitor.executeSsCommand;
@@ -160,6 +168,7 @@ export class StreamMonitor {
     this.clientTtlMs = options.clientTtlMs ?? 15000;
     this.rtmpTargetResolver = options.rtmpTargetResolver ?? new RtmpTargetResolver();
     this.forwardMapProvider = options.forwardMapProvider;
+    this.publishMapProvider = options.publishMapProvider;
     this.eventLog = options.eventLog ?? new StreamEventLog();
     this.streamBandwidthLog = options.streamBandwidthLog;
     this.pathInfoService = options.pathInfoService;
@@ -201,8 +210,16 @@ export class StreamMonitor {
           continue;
         }
 
+        // A mediamtx socket whose peer matches an active rtmp_conns publisher IS that
+        // publisher's accepted connection: in a direct-to-mediamtx deployment ss only
+        // attributes it to the shared mediamtx process, so without this correlation it
+        // would fall into the generic mediamtx branch below and never group with its path.
+        const publishPath = line.includes("mediamtx") ? this.lookupPublishPath(peerAddress) : undefined;
+
         if (peerAddress.endsWith(":443") && line.includes("stunnel4")) {
           targetName = "TWITCH";
+        } else if (publishPath) {
+          targetName = "INBOUND";
         } else if (
           (line.includes("ffmpeg") || line.includes("mediamtx")) &&
           !StreamMonitor.isLoopbackAddress(peerAddress)
@@ -242,9 +259,11 @@ export class StreamMonitor {
             local_ip: localAddress,
             peer_ip: peerAddress,
             pid,
-            stream_id: line.includes("ffmpeg")
-              ? (this.getFfmpegStreamId(pid) ?? undefined)
-              : this.getForwardStreamId(peerAddress),
+            stream_id:
+              publishPath ??
+              (line.includes("ffmpeg")
+                ? (this.getFfmpegStreamId(pid) ?? undefined)
+                : this.getForwardStreamId(peerAddress)),
           };
         }
 
@@ -323,6 +342,7 @@ export class StreamMonitor {
 
     try {
       this.lastForwardMap = this.forwardMapProvider?.() ?? new Map<string, string>();
+      this.lastPublishMap = this.publishMapProvider?.() ?? new Map<string, string>();
       const data = this.parse(commandResult.stdout);
       await this.resolveRtmpTargets(data);
       this.assignStreams(data);
@@ -495,6 +515,35 @@ export class StreamMonitor {
     );
   }
 
+  private lookupPublishPath(peerAddress: string): string | undefined {
+    // Correlate a socket's peer against the rtmp_conns publisher map mirrored from
+    // SrtMonitor. ss renders an IPv4 peer accepted on an IPv6 listener as a bracketed
+    // IPv4-mapped address ("[::ffff:1.2.3.4]:5678") while mediamtx reports the same
+    // connection as plain "1.2.3.4:5678"; canonicalAddr reconciles the two. The raw and
+    // normalizeAddr fallbacks cover genuine IPv6 peers, mirroring getForwardStreamId.
+    return (
+      this.lastPublishMap.get(StreamMonitor.canonicalAddr(peerAddress)) ??
+      this.lastPublishMap.get(StreamMonitor.normalizeAddr(peerAddress)) ??
+      this.lastPublishMap.get(peerAddress)
+    );
+  }
+
+  private static canonicalAddr(address: string): string {
+    // "[::ffff:1.2.3.4]:5678" -> "1.2.3.4:5678": strip the IPv6 brackets, then drop the
+    // ::ffff: IPv4-mapped prefix so the form matches mediamtx's rtmp_conns remoteAddr.
+    let rest = address;
+    if (rest.startsWith("[")) {
+      const close = rest.indexOf("]");
+      if (close >= 0) {
+        rest = rest.slice(1, close) + rest.slice(close + 1);
+      }
+    }
+    if (rest.startsWith("::ffff:")) {
+      rest = rest.slice("::ffff:".length);
+    }
+    return rest;
+  }
+
   private connectionKey(metric: StreamMetrics): string {
     return `${metric.peer_ip}_${metric.local_ip}`;
   }
@@ -511,7 +560,14 @@ export class StreamMonitor {
       currentKeys.add(key);
 
       if (metric.stream_id && !this.activeStreams.has(metric.stream_id)) {
-        this.activeStreams.set(metric.stream_id, { startedAt: now, inboundKey: "", loggedStart: true });
+        // A path id on an INBOUND metric (publisher correlated via the mediamtx publish map)
+        // starts unconfirmed like a synthetic stream-N inbound, so stream_start still fires
+        // once payload is confirmed below. Outbound-labeled ids keep pre-started semantics.
+        this.activeStreams.set(metric.stream_id, {
+          startedAt: now,
+          inboundKey: "",
+          loggedStart: metric.target !== "INBOUND",
+        });
       }
 
       if (metric.stream_id) {
@@ -523,15 +579,24 @@ export class StreamMonitor {
         metric.stream_id = existingStreamId;
       }
 
+      // A socket owned by mediamtx on a monitored inbound port is an accepted publisher (or
+      // direct RTMP reader), never an outbound dial. Until the publish map knows its peer it
+      // stays unclassified — but it must not grab a time-window association slot belonging
+      // to an unrelated stream during that first tick.
+      const isMediamtxListenerSocket =
+        metric.target !== "INBOUND" &&
+        !metric.stream_id &&
+        StreamMonitor.isMonitoredInboundAddress(metric.local_ip);
+
       if (!this.firstSeen.has(key)) {
         this.firstSeen.set(key, now);
         if (metric.target === "INBOUND") {
           if (this.isConfirmedInbound(metric, now)) {
             newInbounds.push({ key, metric });
           }
-        } else if (!metric.stream_id) {
+        } else if (!metric.stream_id && !isMediamtxListenerSocket) {
           newOutbounds.push({ key, metric });
-        } else {
+        } else if (metric.stream_id) {
           this.eventLog.push({
             timestamp: new Date(now).toISOString(),
             type: "target_connected",
@@ -541,17 +606,32 @@ export class StreamMonitor {
             peerIp: metric.peer_ip,
           });
         }
+        // Remaining case — an uncorrelated mediamtx listener socket — is held out of both
+        // association paths until the publish map identifies its peer (or the socket goes
+        // away), so it cannot grab a time-window slot belonging to an unrelated stream.
       } else if (metric.target === "INBOUND" && !metric.stream_id && this.isConfirmedInbound(metric, now)) {
         newInbounds.push({ key, metric });
-      } else if (metric.target !== "INBOUND" && !metric.stream_id) {
+      } else if (metric.target !== "INBOUND" && !metric.stream_id && !isMediamtxListenerSocket) {
         newOutbounds.push({ key, metric });
       }
     }
 
     for (const { key, metric } of newInbounds) {
-      this.streamCounter += 1;
-      const streamId = `stream-${this.streamCounter}`;
-      this.activeStreams.set(streamId, { startedAt: now, inboundKey: key, loggedStart: false });
+      // A publisher correlated through the mediamtx publish map already carries its path as
+      // stream_id ("cloudru"); reuse it so the logical stream merges with consumers of the
+      // same path across monitors instead of spawning a synthetic stream-N. The entry may
+      // already exist from the pre-registration pass above — rebind its inboundKey only.
+      let streamId = metric.stream_id;
+      if (!streamId) {
+        this.streamCounter += 1;
+        streamId = `stream-${this.streamCounter}`;
+      }
+      const existingState = this.activeStreams.get(streamId);
+      if (existingState) {
+        existingState.inboundKey = key;
+      } else {
+        this.activeStreams.set(streamId, { startedAt: now, inboundKey: key, loggedStart: false });
+      }
       this.connectionToStream.set(key, streamId);
       metric.stream_id = streamId;
     }

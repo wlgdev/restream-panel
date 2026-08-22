@@ -161,6 +161,30 @@ srt_conns_ms_rtt{id="a9b0be6b-2fd4-4db3-8883-57fce50c14c4",path="vk",remoteAddr=
     expect(monitor.getForwardMap().get("185.226.53.77:1935")).toBe("test");
   });
 
+  test("exposes active RTMP publishers remoteAddr -> path via getPublishMap", async () => {
+    const stdout = `# RTMP connections
+rtmp_conns{id="pub-1",path="cloudru",remoteAddr="109.63.131.27:58938",state="publish"} 1
+rtmp_conns_inbound_bytes{id="pub-1",path="cloudru",remoteAddr="109.63.131.27:58938",state="publish"} 26864133
+rtmp_conns{id="read-1",path="cloudru",remoteAddr="213.171.28.227:44785",state="read"} 1
+rtmp_conns{id="relay-1",path="vk",remoteAddr="127.0.0.1:42392",state="publish"} 1
+
+# SRT connections
+srt_conns 0
+`;
+
+    const monitor = new SrtMonitor({
+      metricsFetcher: async () => ({ success: true, stdout, stderr: "" }),
+    });
+
+    await monitor.collectOnce();
+
+    // Only the live publisher correlates: read conns describe consumers and loopback remotes
+    // are internal relays (e.g. nginx fronting mediamtx), while derivative metric lines must
+    // not create phantom conns.
+    expect(monitor.getPublishMap().size).toBe(1);
+    expect(monitor.getPublishMap().get("109.63.131.27:58938")).toBe("cloudru");
+  });
+
   test("parses SRT inbound from the combined metrics payload without losing forward section", async () => {
     const monitor = new SrtMonitor({
       metricsFetcher: async () => ({

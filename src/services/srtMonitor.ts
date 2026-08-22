@@ -69,6 +69,13 @@ interface ForwardDest {
   state: string;
 }
 
+interface RtmpConn {
+  id: string;
+  path: string;
+  remoteAddr: string | null;
+  state: string;
+}
+
 interface SrtPreviousState {
   packets_received_drop: number;
   packets_send_drop: number;
@@ -144,6 +151,11 @@ export class SrtMonitor {
   // Map of forward remoteAddr (ip:port) -> path, derived from the forward_dests metrics
   // section. Consumed by StreamMonitor to correlate mediamtx outbound RTMP sockets with a path.
   private lastForwardMap = new Map<string, string>();
+
+  // Map of publishing rtmp_conns remoteAddr (ip:port) -> path, derived from the rtmp_conns
+  // metrics section. Consumed by StreamMonitor to classify a publisher's TCP socket (which ss
+  // only attributes to the shared mediamtx process) as INBOUND and group it under its path.
+  private lastPublishMap = new Map<string, string>();
 
   private readonly metricsFetcher: () => Promise<CommandExecutionResult>;
   private readonly now: () => number;
@@ -276,6 +288,59 @@ export class SrtMonitor {
     return map;
   }
 
+  // Parse the rtmp_conns metrics section into per-connection identity records. Like the SRT
+  // parser above, only base `rtmp_conns{...}` lines carry the label set; derivatives such as
+  // `rtmp_conns_inbound_bytes{...}` are skipped by pinning the prefix to `rtmp_conns{`.
+  public parseRtmpConnections(output: string): RtmpConn[] {
+    const conns = new Map<string, RtmpConn>();
+
+    for (const line of output.split("\n")) {
+      // remoteAddr is always present on live connections but keep it optional to mirror the
+      // forward_dests shape (an idle/tearing-down conn could shed the label).
+      const match = line.match(
+        /^rtmp_conns\{id="([^"]+)",path="([^"]+)"(?:,remoteAddr="([^"]*)")?,state="([^"]+)"\}\s+\d+/,
+      );
+      if (!match) continue;
+
+      const id = match[1]!;
+      if (conns.has(id)) continue;
+
+      conns.set(id, {
+        id,
+        path: match[2]!,
+        remoteAddr: match[3] ? match[3] : null,
+        state: match[4]!,
+      });
+    }
+
+    return [...conns.values()];
+  }
+
+  public getPublishMap(): Map<string, string> {
+    return this.lastPublishMap;
+  }
+
+  private buildPublishMap(conns: RtmpConn[]): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const conn of conns) {
+      // Only publish (inbound) connections identify a stream source; read conns describe
+      // consumers and must not classify a socket as INBOUND. Loopback remotes are internal
+      // relays (e.g. nginx fronting mediamtx): their publisher socket belongs to another
+      // process and is classified by StreamMonitor's own inbound branch, never by correlation.
+      if (conn.state === "publish" && conn.remoteAddr && !SrtMonitor.isLoopbackRemote(conn.remoteAddr)) {
+        map.set(conn.remoteAddr, conn.path);
+      }
+    }
+    return map;
+  }
+
+  private static isLoopbackRemote(address: string): boolean {
+    // ip:port with an optional bracketed IPv6 host ([::1]:5000).
+    const host = address.startsWith("[") ? address.slice(1, address.lastIndexOf("]")) : address.slice(0, address.lastIndexOf(":"));
+
+    return host === "::1" || host === "::ffff:127.0.0.1" || host.startsWith("127.");
+  }
+
   public async touchClient(clientId: string): Promise<void> {
     this.activeClients.set(clientId, this.now());
 
@@ -318,6 +383,7 @@ export class SrtMonitor {
       const srtlaPaths = this.parseSrtlaPaths(commandResult.stdout);
       const data = rawData.map((raw) => this.calculateHealth(raw, srtlaPaths));
       this.lastForwardMap = this.buildForwardMap(this.parseForwardDestinations(commandResult.stdout));
+      this.lastPublishMap = this.buildPublishMap(this.parseRtmpConnections(commandResult.stdout));
       this.syncActiveStreams(data);
       await this.ensurePathTracks(data);
       const streams = this.buildLogicalStreams(data);

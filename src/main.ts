@@ -37,6 +37,7 @@ const streamMonitor = new StreamMonitor({
   useMockData,
   mockOutputs: [test_vk],
   forwardMapProvider: () => srtMonitor.getForwardMap(),
+  publishMapProvider: () => srtMonitor.getPublishMap(),
   eventLog: sharedEventLog,
   streamBandwidthLog: sharedBandwidthLog,
   pathInfoService,
