@@ -1,13 +1,6 @@
-import { Elysia } from "elysia";
 import type { AppConfig } from "../config";
-import { createApplicationsRoutes } from "./routes/applications";
-import { createServersRoutes } from "./routes/servers";
-import { createSystemRoutes } from "./routes/system";
-import type { ConfigService } from "../services/configService";
-import type { NginxService } from "../services/nginxService";
-import type { StreamMonitor } from "../services/streamMonitor";
-import type { SrtMonitor } from "../services/srtMonitor";
-import { rtmpTestService } from "../services/rtmpTestService";
+import type { MonitorManager } from "../monitor/monitor-manager";
+import { createAuthMiddleware } from "./auth";
 
 // Detect if running from source (.ts) or binary
 const isRunningFromSource = Bun.main.endsWith(".ts");
@@ -19,16 +12,6 @@ if (!isRunningFromSource) {
     embedded = require("../embedded");
   } catch {}
 }
-
-const SKIP_AUTH = new Set([
-  "/",
-  "/health",
-  "/api/health/streams",
-  "/api/health/streams/disconnect",
-  "/styles.css",
-  "/main.js",
-  "/favicon.ico",
-]);
 
 function serveEmbedded(content: string, contentType: string): Response {
   return new Response(content, { headers: { "Content-Type": contentType } });
@@ -42,100 +25,86 @@ async function serveFile(path: string, contentType: string): Promise<Response> {
   return new Response("Not found", { status: 404 });
 }
 
+const serveIndex = async () => {
+  if (embedded) return serveEmbedded(embedded.EMBEDDED_HTML, "text/html");
+  return serveFile("./public/index.html", "text/html");
+};
+
+const SSE_INTERVAL_MS = 5000;
+
+export interface ApiServerOptions {
+  tls?: { key: Bun.BunFile; cert: Bun.BunFile };
+}
+
 export function createApiServer(
   config: AppConfig,
-  configService: ConfigService,
-  nginxService: NginxService,
-  streamMonitor: StreamMonitor,
-  srtMonitor: SrtMonitor,
-  serveOptions: any = {},
+  manager: MonitorManager,
+  serveOptions: ApiServerOptions = {},
 ) {
-  const app = new Elysia({ serve: serveOptions })
-    .get("/health", async () => {
-      if (embedded) return serveEmbedded(embedded.EMBEDDED_HTML, "text/html");
-      return serveFile("./public/index.html", "text/html");
-    })
-    .get("/api/rtmptest/measure", ({ query, set }) => {
-      try {
-        return rtmpTestService(query as Record<string, string>);
-      } catch (error: any) {
-        set.status = 500;
-        return { error: error.message };
-      }
-    })
-    .get("/api/health/streams", async ({ query }) => {
-      const clientId =
-        typeof query.client === "string" && query.client.length > 0 ? query.client : "anonymous-health-client";
-      await Promise.all([streamMonitor.touchClient(clientId), srtMonitor.touchClient(clientId)]);
-      const bwSince = typeof query.bwSince === "string" ? parseInt(query.bwSince, 10) : undefined;
-      return {
-        rtmp: streamMonitor.getSnapshot(),
-        srt: srtMonitor.getSnapshot(),
-        events: streamMonitor.getEventsSince(
-          typeof query.since === "string" ? parseInt(query.since, 10) : undefined
-        ),
-        bandwidth: streamMonitor.getBandwidthSince(bwSince),
-      };
-    })
+  const checkAuth = createAuthMiddleware(config);
 
-    .post("/api/health/streams/disconnect", ({ query }) => {
-      if (typeof query.client === "string" && query.client.length > 0) {
-        streamMonitor.disconnectClient(query.client);
-        srtMonitor.disconnectClient(query.client);
-      }
-
-      return { success: true };
-    })
-    .get("/styles.css", async () => {
-      if (embedded) return serveEmbedded(embedded.EMBEDDED_CSS, "text/css");
-      return serveFile("./public/styles.css", "text/css");
-    })
-    .get("/main.js", async () => {
-      if (embedded) return serveEmbedded(embedded.EMBEDDED_JS, "application/javascript");
-      return serveFile("./public/main.js", "application/javascript");
-    })
-    .get("/", async () => {
-      if (embedded) return serveEmbedded(embedded.EMBEDDED_HTML, "text/html");
-      return serveFile("./public/index.html", "text/html");
-    })
-    .onBeforeHandle(({ request, set }) => {
-      const pathname = new URL(request.url).pathname;
-      if (SKIP_AUTH.has(pathname)) return;
-
-      const authHeader = request.headers.get("Authorization");
-
-      if (!authHeader || !authHeader.startsWith("Basic ")) {
-        set.status = 401;
-        return { error: "Unauthorized" };
-      }
-
-      const encoded = authHeader.slice(6);
-      const decoded = atob(encoded);
-      const [username, password] = decoded.split(":");
-
-      if (username !== config.auth.username || password !== config.auth.password) {
-        set.status = 401;
-        return { error: "Unauthorized" };
-      }
-    });
-
-  if (config.enableNginxConfig) {
-    app.use(createApplicationsRoutes(configService));
-    app.use(createServersRoutes(configService));
-  }
-
-  app.use(createSystemRoutes(nginxService, config))
-    .onError(({ error, code }) => {
-      if (code === "NOT_FOUND") return;
-
+  return Bun.serve({
+    port: config.port,
+    ...serveOptions,
+    routes: {
+      "/": serveIndex,
+      "/monitor": serveIndex,
+      "/styles.css": async () => {
+        if (embedded) return serveEmbedded(embedded.EMBEDDED_CSS, "text/css");
+        return serveFile("./public/styles.css", "text/css");
+      },
+      "/main.js": async () => {
+        if (embedded) return serveEmbedded(embedded.EMBEDDED_JS, "application/javascript");
+        return serveFile("./public/main.js", "application/javascript");
+      },
+      "/api/system/status": async (request) => {
+        const denied = await checkAuth(request);
+        if (denied) return denied;
+        return Response.json({
+          success: true,
+          status: { app: { ip: config.ip } },
+        });
+      },
+      // Live monitor feed: a full MonitorSnapshot frame every tick.
+      // Public like the old polling endpoint (Login gates the UI client-side);
+      // EventSource cannot send Authorization headers, so auth stays out here.
+      "/api/monitor/stream": () => {
+        let timer: ReturnType<typeof setInterval> | null = null;
+        const stream = new ReadableStream({
+          start(controller) {
+            const send = () => {
+              try {
+                controller.enqueue(`data: ${JSON.stringify(manager.getSnapshot())}\n\n`);
+              } catch {
+                // Client gone mid-write; cancel() cleans up the timer.
+              }
+            };
+            send();
+            timer = setInterval(send, SSE_INTERVAL_MS);
+          },
+          cancel() {
+            if (timer) clearInterval(timer);
+            timer = null;
+          },
+        });
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+          },
+        });
+      },
+    },
+    fetch() {
+      return new Response("Not found", { status: 404 });
+    },
+    error(error) {
       console.error("API Error:", error);
-
-      if (code === "VALIDATION") {
-        return { error: "Validation error", details: String(error) };
-      }
-
-      return { error: "Internal server error" };
-    });
-
-  return app;
+      return new Response(JSON.stringify({ error: "Internal server error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
 }

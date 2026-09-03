@@ -1,5 +1,3 @@
-import type { CombinedHealthSnapshot } from "./types";
-
 const API_BASE = "/api";
 
 let authToken = localStorage.getItem("restream_auth_token");
@@ -28,7 +26,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
-  
+
   if (authToken) {
     headers["Authorization"] = `Basic ${authToken}`;
   }
@@ -54,70 +52,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return data as T;
 }
 
-export async function getApplications() {
-  return request<{ applications: any[]; streamTargets: { id: string }[] }>("/applications");
-}
-
-export async function getServers() {
-  return request<{ servers: any[] }>("/servers");
-}
-
 export async function getStatus() {
-  // Update return type to include app.ip
-  return request<{ status: { nginx: { enabled?: boolean; running: boolean; version: string }; app: { ip: string } } }>("/system/status");
+  return request<{ status: { app: { ip: string } } }>("/system/status");
 }
 
-export async function createApplication(name: string, pushTargets: { serverId: string; streamKey: string }[]) {
-  return request("/applications", {
-    method: "POST",
-    body: JSON.stringify({ name, pushTargets }),
-  });
-}
-
-export async function updateApplication(
-  originalName: string,
-  name: string,
-  pushTargets: { serverId: string; streamKey: string }[],
-) {
-  return request(`/applications/${originalName}`, {
-    method: "PUT",
-    body: JSON.stringify({ name, pushTargets }),
-  });
-}
-
-export async function deleteApplication(name: string) {
-  return request(`/applications/${name}`, {
-    method: "DELETE",
-  });
-}
-
-export async function reloadNginx() {
-  return request("/system/reload", {
-    method: "POST",
-  });
-}
-
-export async function getStreams(clientId: string, since?: number, bwSince?: number) {
-  let url = `${API_BASE}/health/streams?client=${encodeURIComponent(clientId)}`;
-  if (since !== undefined) {
-    url += `&since=${since}`;
-  }
-  if (bwSince !== undefined) {
-    url += `&bwSince=${bwSince}`;
-  }
-  const response = await fetch(url, {
-    cache: "no-store",
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
-  return response.json() as Promise<CombinedHealthSnapshot>;
-}
-
-
-export async function disconnectClient(clientId: string) {
-  return fetch(`${API_BASE}/health/streams/disconnect?client=${encodeURIComponent(clientId)}`, {
-    method: "POST",
-    keepalive: true,
-  });
-}

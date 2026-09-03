@@ -1,12 +1,9 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import uPlot from "uplot";
-import type { StreamHealthItem } from "../types";
+import type { ConnectionItem } from "../types";
+import type { BandwidthPoint } from "../../core/types";
 
-export interface BandwidthPoint {
-  time: number;
-  inboundBps: number | null;
-  outbounds: Record<string, number>;
-}
+export type { BandwidthPoint };
 
 export interface StreamBandwidthSeriesMeta {
   key: string;
@@ -18,8 +15,8 @@ export interface StreamBandwidthSeriesMeta {
 interface Props {
   streamId: string;
   history: BandwidthPoint[];
-  inbound: StreamHealthItem | null;
-  outbound: StreamHealthItem[];
+  inbound: ConnectionItem | null;
+  outbound: ConnectionItem[];
 }
 
 function getTargetColor(target: string): string {

@@ -1,73 +1,47 @@
 import { createApiServer } from "./api";
 import { loadConfig } from "./config";
-import { ConfigService } from "./services/configService";
-import { NginxService } from "./services/nginxService";
-import { StreamMonitor } from "./services/streamMonitor";
 import { test_vk } from "../mocks/ss";
-import { SrtMonitor } from "./services/srtMonitor";
-import { srtAndForward1, srtAndForward2, srtAndForward3, srtAndForwardNull } from "../mocks/srt";
+import { srtAndForward1, srtAndForward2, srtAndForward3 } from "../mocks/srt";
 import { pathes } from "../mocks/srt";
-import { PathInfoService } from "./services/pathInfoService";
-import { resolve, join } from "path";
-import { StreamEventLog } from "./services/streamEventLog";
-import { StreamBandwidthLog } from "./services/streamBandwidthLog";
+import { join } from "path";
+import { StreamEventLog } from "./monitor/event-log";
+import { StreamBandwidthLog } from "./monitor/bandwidth-log";
+import { RtmpGrouping } from "./monitor/grouping/rtmp-grouping";
+import { SrtGrouping } from "./monitor/grouping/srt-grouping";
+import { MonitorManager } from "./monitor/monitor-manager";
 
 const config = loadConfig();
-const nginxService = new NginxService();
-const isRunningFromSource = Bun.main.endsWith(".ts");
-const isLocalDevHost = config.ip === "localhost" || config.ip === "127.0.0.1";
-const useMockData = isRunningFromSource && isLocalDevHost;
+// Mock fixtures (no ss/mediamtx needed) are opt-in via `bun run dev:mock` / `start:mock`.
+// A plain `bun run src/main.ts` always talks to the real local mediamtx — including on Windows.
+const useMockData = process.env.MOCK === "1";
 
 const sharedEventLog = new StreamEventLog();
 const sharedBandwidthLog = new StreamBandwidthLog();
 
-const pathInfoService = new PathInfoService({
-  useMockData,
-  mockOutput: pathes,
-});
-
-const srtMonitor = new SrtMonitor({
+const srtGrouping = new SrtGrouping({
   useMockData,
   mockOutputs: [srtAndForward1, srtAndForward2, srtAndForward3],
   eventLog: sharedEventLog,
   streamBandwidthLog: sharedBandwidthLog,
-  pathInfoService,
+  pathInfo: useMockData ? { useMockData, mockOutput: pathes } : undefined,
 });
-const streamMonitor = new StreamMonitor({
+const rtmpGrouping = new RtmpGrouping({
   useMockData,
   mockOutputs: [test_vk],
-  forwardMapProvider: () => srtMonitor.getForwardMap(),
-  publishMapProvider: () => srtMonitor.getPublishMap(),
+  forwardMapProvider: () => srtGrouping.getForwardMap(),
+  publishMapProvider: () => srtGrouping.getPublishMap(),
   eventLog: sharedEventLog,
   streamBandwidthLog: sharedBandwidthLog,
-  pathInfoService,
+  tracks: srtGrouping,
 });
 
-streamMonitor.startBackgroundPolling();
-srtMonitor.startBackgroundPolling();
-// Resolve absolute path to avoid ambiguity (e.g. running from dist/ but thinking relative to src/)
-// If config.nginxConfigPath is relative (e.g. "./nginx.conf"), it resolves against CWD.
-const absoluteConfigPath = resolve(process.cwd(), config.nginxConfigPath);
-const configService = new ConfigService(absoluteConfigPath);
-
-let appCount = 0;
-let loadResult: any = { success: false, data: null };
-
-if (config.enableNginxConfig) {
-  // Ensure config exists
-  loadResult = await configService.loadConfig();
-  if (!loadResult.success) {
-    console.warn(`⚠️  Warning: Failed to load initial config from ${absoluteConfigPath}: ${loadResult.error}`);
-  }
-
-  // Validate nginx config on startup
-  const validation = await nginxService.validateConfig();
-  if (!validation.success) {
-    console.error("❌ Invalid nginx configuration:");
-    console.error(validation.error);
-    process.exit(1);
-  }
-}
+const manager = new MonitorManager({
+  rtmpGrouping,
+  srtGrouping,
+  eventLog: sharedEventLog,
+  streamBandwidthLog: sharedBandwidthLog,
+});
+manager.startBackgroundPolling();
 
 // Check for TLS certificate and key in the application directory
 // Using process.cwd() as primary search location
@@ -95,44 +69,38 @@ try {
   console.warn("Error checking for SSL certificates:", err);
 }
 
-// Pass serveOptions (including TLS) to Elysia constructor via createApiServer
-const app = createApiServer(config, configService, nginxService, streamMonitor, srtMonitor, serveOptions);
-
-// Try to listen, handling EADDRINUSE
+// Bun.serve binds synchronously and throws on EADDRINUSE.
+let server: ReturnType<typeof createApiServer>;
 try {
-  app.listen(config.port, () => {
-    console.log("Starting Restream Panel...");
-    console.log(`Version: ${typeof VERSION === "undefined" ? "dev" : VERSION}`);
-    console.log(`Port: ${config.port}`);
-    console.log(`Config path: ${absoluteConfigPath}`); // Log absolute path
-    console.log(`IP: ${config.ip}`);
-
-    if (protocol === "https") {
-      console.log(`🔒 SSL Enabled using:`);
-      console.log(`   Key: ${keyPath}`);
-      console.log(`   Cert: ${certPath}`);
-    }
-
-    if (config.enableNginxConfig) {
-      if (loadResult.success && loadResult.data) {
-        appCount = loadResult.data.applications.length;
-      }
-      console.log(`Loaded ${appCount} applications`);
-    } else {
-      console.log(`NGINX Management is disabled (start with --nginx to enable)`);
-    }
-
-    console.log(`\n🚀 Restream Panel is running at ${protocol}://${config.ip}:${config.port}`);
-    if (config.ip !== "localhost") {
-      console.log(`   (Also accessible via ${protocol}://localhost:${config.port})`);
-    }
-
-    console.log("\nDefault credentials: admin / restream");
-    console.log("Press Ctrl+C to stop the server");
-  });
+  server = createApiServer(config, manager, serveOptions);
 } catch (err: unknown) {
-  // Note: Bun/Elysia app.listen might throw synchronously or reject.
+  if ((err as any)?.code === "EADDRINUSE" || String(err).includes("EADDRINUSE")) {
+    console.error(`\n❌ Error: Port ${config.port} is already in use!`);
+    console.error(`   Please stop the other instance of Restream Panel (or check for 'bun' processes).`);
+    console.error(`   Alternatively, use '--port=XXXX' to specify a different port.\n`);
+    process.exit(1);
+  }
+  throw err;
 }
+
+console.log("Starting Restream Panel...");
+console.log(`Version: ${typeof VERSION === "undefined" ? "dev" : VERSION}`);
+console.log(`Port: ${config.port}`);
+console.log(`IP: ${config.ip}`);
+
+if (protocol === "https") {
+  console.log(`🔒 SSL Enabled using:`);
+  console.log(`   Key: ${keyPath}`);
+  console.log(`   Cert: ${certPath}`);
+}
+
+console.log(`\n🚀 Restream Panel is running at ${protocol}://${config.ip}:${config.port}`);
+if (config.ip !== "localhost") {
+  console.log(`   (Also accessible via ${protocol}://localhost:${config.port})`);
+}
+
+console.log("\nDefault credentials: admin / restream");
+console.log("Press Ctrl+C to stop the server");
 
 // Global error handler for the process to catch binding errors if app.listen is async
 process.on("uncaughtException", (err: any) => {
@@ -158,7 +126,7 @@ process.on("unhandledRejection", (err: any) => {
 
 process.on("SIGINT", () => {
   console.log("\nStopping server...");
-  streamMonitor.stopAll();
-  srtMonitor.stopAll();
+  manager.stopAll();
+  server.stop();
   process.exit(0);
 });
