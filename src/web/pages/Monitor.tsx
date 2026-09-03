@@ -386,9 +386,6 @@ export function Monitor() {
                       <div className="plaque-bitrate">
                         {formatBitrate(stream.inbound?.rx_bps ?? 0)}
                       </div>
-                      <div className="plaque-cap">
-                        in · <span style={{ color: healthTone(worstHealth) }}>{worstHealth}%</span>
-                      </div>
                     </div>
                   </div>
                   <StreamBandwidthChart

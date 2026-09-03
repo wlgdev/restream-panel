@@ -120,24 +120,6 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
   const chartDataRef = useRef(chartData);
   chartDataRef.current = chartData;
 
-  // Latest value per series for the visible legend row.
-  const legendItems = useMemo(
-    () =>
-      seriesMetaList.map((meta, i) => {
-        const arr = chartData[i + 1] ?? [];
-        let current: number | null = null;
-        for (let k = arr.length - 1; k >= 0; k--) {
-          const v = arr[k];
-          if (v !== null && v !== undefined) {
-            current = v;
-            break;
-          }
-        }
-        return { meta, current };
-      }),
-    [seriesMetaList, chartData],
-  );
-
   useEffect(() => {
     if (!plotRef.current || !containerRef.current) return;
 
@@ -214,7 +196,7 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
           },
           font: "10px JetBrains Mono, monospace",
           values: (u, splits) => splits.map((v) => formatBitrate(v)),
-          size: 65,
+          size: 80,
         },
       ],
       legend: {
@@ -423,11 +405,10 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
       <div className="stream-chart-header">
         <div className="stream-chart-legend">
           <span className="stream-chart-eyebrow">Bandwidth</span>
-          {legendItems.map(({ meta, current }) => (
+          {seriesMetaList.map((meta) => (
             <span key={meta.key} className="stream-chart-legend-item">
               <span className="stream-chart-legend-dot" style={{ backgroundColor: meta.color }} />
               <span className="stream-chart-legend-label">{meta.label}</span>
-              <span className="stream-chart-legend-val">{formatBitrate(current)}</span>
             </span>
           ))}
         </div>

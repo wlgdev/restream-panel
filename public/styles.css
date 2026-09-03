@@ -518,14 +518,6 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
-.plaque-cap {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
 /* Stream identity: left-aligned title + single meta line (was a centered subtitle). */
 .stream-head {
   margin-bottom: 1rem;
@@ -772,13 +764,6 @@ h1 {
   text-transform: uppercase;
   color: var(--faint);
 }
-
-.stream-chart-legend-val {
-  color: var(--text-main);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
 
 .stream-chart-legend {
   display: flex;
