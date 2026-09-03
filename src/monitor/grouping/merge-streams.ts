@@ -9,6 +9,7 @@ export interface MergableStream<Inbound, Outbound> {
   inbound: Inbound | null;
   outbound: Outbound[];
   tracks?: Track[];
+  readers?: number;
 }
 
 // Merges the RTMP and SRT groupings into one logical-stream list, keyed by stream id.
@@ -28,6 +29,7 @@ export function mergeStreams<Stream extends MergableStream<unknown, unknown>>(
         inbound: s.inbound,
         outbound: [...s.outbound],
         tracks: s.tracks,
+        readers: s.readers,
       } as Stream);
     }
   }
@@ -44,6 +46,9 @@ export function mergeStreams<Stream extends MergableStream<unknown, unknown>>(
         if (!existing.tracks?.length && s.tracks?.length) {
           existing.tracks = s.tracks;
         }
+        if (existing.readers === undefined && s.readers !== undefined) {
+          existing.readers = s.readers;
+        }
       } else {
         map.set(s.id, {
           id: s.id,
@@ -51,6 +56,7 @@ export function mergeStreams<Stream extends MergableStream<unknown, unknown>>(
           inbound: s.inbound,
           outbound: [...s.outbound],
           tracks: s.tracks,
+          readers: s.readers,
         } as Stream);
       }
     }

@@ -150,6 +150,10 @@ export class MediamtxCollector {
     return this.pathInfo.getTracks(path);
   }
 
+  public getReaders(path: string): number | undefined {
+    return this.pathInfo.getReaders(path);
+  }
+
   public async collect(): Promise<MediamtxCollectResult> {
     const commandResult = await this.getMetricsResult();
 

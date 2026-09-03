@@ -3,19 +3,65 @@ import type {
   MonitorSnapshot,
   ConnectionItem,
   StreamEvent,
-  Track,
 } from "../types";
-import { StreamBandwidthChart, type BandwidthPoint } from "../components/StreamBandwidthChart";
+import type { BandwidthPoint } from "../../core/types";
+import { StreamBandwidthChart } from "../components/StreamBandwidthChart";
+import {
+  eventDescription,
+  eventTypeClass,
+  eventTypeLabel,
+  formatBitrate,
+  formatBytes,
+  formatDuration,
+  formatEventTime,
+  formatRtt,
+  formatTrack,
+  healthTone,
+  protoColor,
+  targetColor,
+  targetLabel,
+} from "../lib/format";
+
+// Log filter groups (chips) and severity (entry accent bar) derive from the
+// same event type: groups answer "what object", severity answers "good/bad".
+const eventGroup = (type: string): "streams" | "targets" | "quality" => {
+  if (type === "stream_start" || type === "stream_end") return "streams";
+  if (type === "quality_degraded") return "quality";
+  return "targets";
+};
+
+const eventSev = (type: string): "up" | "down" | "degraded" | "info" => {
+  switch (type) {
+    case "stream_start":
+    case "target_connected":
+      return "up";
+    case "stream_end":
+    case "target_disconnected":
+      return "down";
+    case "quality_degraded":
+      return "degraded";
+    default:
+      return "info";
+  }
+};
 
 export function Monitor() {
   const [snapshot, setSnapshot] = useState<MonitorSnapshot | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [connError, setConnError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [bandwidthHistory, setBandwidthHistory] = useState<Record<string, BandwidthPoint[]>>({});
 
   const [eventLog, setEventLog] = useState<StreamEvent[]>([]);
+  const [logFilter, setLogFilter] = useState<"all" | "streams" | "targets" | "quality">("all");
   const logContainerRef = useRef<HTMLDivElement>(null);
   const isStickyRef = useRef(true);
+
+  // Connection health is tracked separately from server-reported errors:
+  // a dropped SSE keeps the last frame on screen behind a stale banner,
+  // while snapshot.errors[] surface as their own banner.
+  const [sseHealth, setSseHealth] = useState<"live" | "stale">("live");
+  const [lastFrameAt, setLastFrameAt] = useState<number | null>(null);
+  const [nowTs, setNowTs] = useState(() => Date.now());
 
   // Each SSE frame carries the full snapshot (streams, full event buffer, full
   // retained bandwidth history), so state is replaced, never merged.
@@ -27,7 +73,7 @@ export function Monitor() {
       try {
         data = JSON.parse(event.data) as MonitorSnapshot;
       } catch {
-        setError("Invalid monitor frame.");
+        setConnError("Invalid monitor frame.");
         return;
       }
 
@@ -43,13 +89,16 @@ export function Monitor() {
         }, 0);
       }
 
-      setError(data.errors.length > 0 ? data.errors.join(" | ") : null);
+      setConnError(null);
+      setSseHealth("live");
+      setLastFrameAt(Date.now());
       setLoading(false);
     };
 
     source.onerror = () => {
       // EventSource retries on its own; flag it but keep the last frame visible.
-      setError("Lost connection to monitor stream, retrying…");
+      setConnError("Lost connection to monitor stream, retrying…");
+      setSseHealth("stale");
       setLoading(false);
     };
 
@@ -58,145 +107,16 @@ export function Monitor() {
     };
   }, []);
 
-
-  const formatBytes = (value: number) => {
-    if (!Number.isFinite(value) || value <= 0) return "0 B";
-    const units = ["B", "KB", "MB", "GB", "TB"];
-    let size = value;
-    let index = 0;
-    while (size >= 1024 && index < units.length - 1) {
-      size /= 1024;
-      index += 1;
-    }
-    return `${size >= 100 || index === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[index]}`;
-  };
-
-  const formatBitrate = (value: number) => {
-    if (!Number.isFinite(value) || value <= 0) return "0 kbps";
-    const units = ["kbps", "Mbps", "Gbps", "Tbps"];
-    let rate = value / 1000;
-    let index = 0;
-    while (rate >= 1000 && index < units.length - 1) {
-      rate /= 1000;
-      index += 1;
-    }
-    return `${rate >= 100 ? rate.toFixed(0) : rate.toFixed(1)} ${units[index]}`;
-  };
-
-  const formatRtt = (value: number) => {
-    if (!Number.isFinite(value) || value <= 0) return "-";
-    return `${value.toFixed(1)} ms`;
-  };
-
-  const formatDuration = (startedAt: number) => {
-    const now = Date.now();
-    const diffMs = now - startedAt;
-    if (diffMs < 0) return "0s";
-    const totalSec = Math.floor(diffMs / 1000);
-    const hours = Math.floor(totalSec / 3600);
-    const minutes = Math.floor((totalSec % 3600) / 60);
-    const seconds = totalSec % 60;
-    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
-    if (minutes > 0) return `${minutes}m ${seconds}s`;
-    return `${seconds}s`;
-  };
-
-  // Render a single mediamtx track as a short token. Video tracks carry resolution +
-  // profile/level; audio tracks carry sample rate + channels. A track is treated as audio
-  // when its codecProps expose sampleRate/channelCount (mediamtx never sets width/height on
-  // audio, nor sampleRate/channelCount on video), so the two kinds render distinctly even
-  // when the codec string alone is ambiguous.
-  const formatTrack = (track: Track): string => {
-    const props = track.codecProps ?? {};
-    const isAudio = props.sampleRate !== undefined || props.channelCount !== undefined;
-
-    if (isAudio) {
-      const rate = props.sampleRate
-        ? `${props.sampleRate % 1000 === 0 ? props.sampleRate / 1000 : (props.sampleRate / 1000).toFixed(1)} kHz`
-        : null;
-      const channels = props.channelCount ? `${props.channelCount}ch` : null;
-      return [track.codec, rate, channels].filter(Boolean).join(" ");
-    }
-
-    const resolution = props.width && props.height ? `${props.width}×${props.height}` : null;
-    const profile = props.profile ? `${props.profile}${props.level ? `@${props.level}` : ""}` : null;
-    return [track.codec, resolution, profile].filter(Boolean).join(" ");
-  };
+  // Re-render clock so the STALE age ticks without new frames.
+  useEffect(() => {
+    const timer = setInterval(() => setNowTs(Date.now()), 5000);
+    return () => clearInterval(timer);
+  }, []);
 
   const handleLogScroll = () => {
     if (!logContainerRef.current) return;
     const { scrollTop, clientHeight, scrollHeight } = logContainerRef.current;
     isStickyRef.current = scrollTop + clientHeight >= scrollHeight - 16;
-  };
-
-  const eventTypeLabel = (type: string) => {
-    switch (type) {
-      case "stream_start":
-        return "STREAM START";
-      case "stream_end":
-        return "STREAM END";
-      case "target_connected":
-        return "TARGET CONNECTED";
-      case "target_disconnected":
-        return "TARGET DISCONNECTED";
-      case "quality_degraded":
-        return "QUALITY DEGRADED";
-      default:
-        return type.toUpperCase();
-    }
-  };
-
-  const eventTypeClass = (type: string) => {
-    switch (type) {
-      case "stream_start":
-      case "target_connected":
-        return "event-type-connected";
-      case "stream_end":
-      case "target_disconnected":
-        return "event-type-disconnected";
-      case "quality_degraded":
-        return "event-type-degraded";
-      default:
-        return "";
-    }
-  };
-
-  const formatEventTime = (iso: string) => {
-    const d = new Date(iso);
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const yy = String(d.getFullYear()).slice(-2);
-    const time = d.toLocaleTimeString("en-US", { hour12: false });
-    return `${dd}.${mm}.${yy} ${time}`;
-  };
-
-  const eventDescription = (event: StreamEvent) => {
-    if (event.type === "quality_degraded" && event.metrics) {
-      return `${targetLabel(event.target)}  H:${event.metrics.health}%  Tx:${formatBitrate(event.metrics.tx_bps)}  RTT:${event.metrics.rtt}ms  Drop:${event.metrics.drop_percent}%`;
-    }
-    if (event.type === "target_connected" || event.type === "target_disconnected") {
-      return `${targetLabel(event.target)} → ${event.peerIp ?? "unknown"}`;
-    }
-    if (event.type === "stream_start" || event.type === "stream_end") {
-      return `Inbound from ${event.peerIp ?? "unknown"}`;
-    }
-    return targetLabel(event.target);
-  };
-
-  const targetLabel = (target: string) => {
-    if (target === "INBOUND") return "Inbound";
-    if (target === "TWITCH") return "Twitch";
-    if (target === "VK") return "VK";
-    if (target === "YOUTUBE") return "YouTube";
-    if (target === "UNKNOWN") return "Unknown";
-    if (target === "OUTBOUND") return "Outbound";
-    return target;
-  };
-
-  const healthClass = (value: number) => {
-    if (value >= 90) return "health-good";
-    if (value >= 70) return "health-warn";
-    return "health-bad";
   };
 
   const rttClass = (item: ConnectionItem) => {
@@ -242,6 +162,7 @@ export function Monitor() {
   // the page only derives view slices, never merges.
   const streams = snapshot?.streams ?? [];
   const orphans = snapshot?.orphans ?? [];
+  const serverErrors = snapshot?.errors ?? [];
 
   const orphanRtmp = orphans.filter((item) => item.protocol === "RTMP" || item.protocol === "RTMPS");
   const orphanSrt = orphans.filter((item) => item.protocol === "SRT" || item.protocol === "SRTLA");
@@ -251,6 +172,23 @@ export function Monitor() {
     orphans.length;
 
   const updatedAt = snapshot?.timestamp;
+
+  const staleForSec =
+    lastFrameAt !== null ? Math.max(0, Math.floor((nowTs - lastFrameAt) / 1000)) : null;
+  const isStale = sseHealth === "stale" || (staleForSec !== null && staleForSec > 10);
+  const showEmpty = !loading && lastFrameAt !== null && streams.length === 0 && orphans.length === 0;
+
+  let streamCount = 0;
+  let targetCount = 0;
+  let qualityCount = 0;
+  for (const entry of eventLog) {
+    const group = eventGroup(entry.type);
+    if (group === "streams") streamCount += 1;
+    else if (group === "targets") targetCount += 1;
+    else qualityCount += 1;
+  }
+  const filteredLog =
+    logFilter === "all" ? eventLog : eventLog.filter((entry) => eventGroup(entry.type) === logFilter);
 
   const renderStreamTable = (items: ConnectionItem[], inbound: ConnectionItem | null) => (
     <div className="health-table-wrap">
@@ -293,14 +231,14 @@ export function Monitor() {
 
             return (
               <tr key={idx}>
-                <td className="health-badge-cell">
-                  <span className={`target-pill target-${item.target.toLowerCase()}`}>{targetLabel(item.target)}</span>
+                <td className="health-mono cell-code" style={{ color: targetColor(item.target) }}>
+                  {targetLabel(item.target)}
                 </td>
-                <td className="health-badge-cell">
-                  <span className={`proto-pill proto-${protocol.toLowerCase()}`}>{protocol}</span>
+                <td className="health-mono cell-code" style={{ color: protoColor(protocol) }}>
+                  {protocol}
                 </td>
-                <td className="health-badge-cell">
-                  <span className={`health-pill ${healthClass(item.health)}`}>{item.health}%</span>
+                <td className="health-mono cell-code" style={{ color: healthTone(item.health) }}>
+                  {item.health}%
                 </td>
                 <td className="health-mono">{item.peer_ip ?? "-"}</td>
                 <td className={`health-mono ${txClass(item, inbound)}`}>{formatBitrate(item.tx_bps)}</td>
@@ -365,9 +303,9 @@ export function Monitor() {
               <div className="version-badge" title="Panel version">
                 {typeof VERSION === "undefined" ? "dev" : VERSION}
               </div>
-              <div className="status-badge running">
+              <div className={`status-badge ${isStale ? "stale" : "running"}`}>
                 <div className="status-dot"></div>
-                <span>live</span>
+                <span>{isStale ? "stale" : "live"}</span>
               </div>
             </div>
           </div>
@@ -376,19 +314,26 @@ export function Monitor() {
 
       <main className="container health-page">
         <section className="toolbar health-toolbar">
+          <div className="stat-group">
+            <span className="stat">
+              Streams <b>{streams.length}</b>
+            </span>
+            <span className="stat">
+              Connections <b>{totalConnections}</b>
+            </span>
+          </div>
           <span className="toolbar-info">
-            {loading
-              ? "Loading connection snapshot..."
-              : error
-                ? "Monitoring error"
-                : `${totalConnections} connections • ${streams.length} stream${streams.length !== 1 ? "s" : ""}`}
-          </span>
-          <span className="toolbar-info">
-            {updatedAt ? `Updated ${new Date(updatedAt).toLocaleString()}` : "Waiting for first update"}
+            {updatedAt
+              ? `Updated ${new Date(updatedAt).toLocaleTimeString("en-US", { hour12: false })}`
+              : "Waiting for first update"}
+            {isStale && staleForSec !== null ? ` · STALE ${staleForSec}s ago` : ""}
           </span>
         </section>
 
-        {error && <div className="alert alert-error">{error}</div>}
+        {connError && <div className="alert alert-warning">{connError}</div>}
+        {serverErrors.length > 0 && (
+          <div className="alert alert-error">{serverErrors.join(" | ")}</div>
+        )}
 
         {loading && totalConnections === 0 && (
           <section className="card health-card">
@@ -398,91 +343,96 @@ export function Monitor() {
           </section>
         )}
 
-        {streams.length > 0 && (
+        {showEmpty && (
           <section className="card health-card">
-            <div className="health-status-row">
-              <div>
-                <div className="card-title">Active Streams</div>
-                <div className="card-subtitle">
-                  {streams.length} logical stream{streams.length !== 1 ? "s" : ""}
-                </div>
-              </div>
-              <div className="status-badge running">
-                <div className="status-dot"></div>
-                <span>monitor active</span>
-              </div>
+            <div className="health-empty" style={{ textAlign: "center", padding: "2rem" }}>
+              No active streams — waiting for publisher.
             </div>
+          </section>
+        )}
 
-            {streams.map((stream) => {
+        {streams.map((stream) => {
               const allItems: ConnectionItem[] = [];
               if (stream.inbound) allItems.push(stream.inbound);
               allItems.push(...stream.outbound);
 
               const tracks = stream.tracks?.length ? stream.tracks : null;
+              const worstHealth =
+                allItems.length > 0 ? Math.min(...allItems.map((c) => c.health)) : 100;
+              const metaParts = [
+                stream.inbound?.peer_ip ?? "Unknown source",
+                `Uptime ${formatDuration(stream.startedAt)}`,
+                ...(tracks ? [tracks.map(formatTrack).join(" · ")] : []),
+                ...(stream.readers !== undefined
+                  ? [`${stream.readers} reader${stream.readers !== 1 ? "s" : ""}`]
+                  : []),
+                ...(stream.outbound.length > 0
+                  ? [`${stream.outbound.length} target${stream.outbound.length !== 1 ? "s" : ""}`]
+                  : []),
+              ];
 
               return (
-                <div key={`combined-${stream.id}`} className="stream-card">
-                  <div
-                    className="card-subtitle"
-                    style={{
-                      textAlign: "center",
-                      marginBottom: tracks ? "0.3rem" : "1rem",
-                      marginTop: "-0.5rem",
-                    }}
-                  >
-                    Stream {stream.id} • {stream.inbound?.peer_ip ?? "Unknown source"} • Uptime{" "}
-                    {formatDuration(stream.startedAt)}
-                    {stream.outbound.length > 0 &&
-                      ` • ${stream.outbound.length} consumer${stream.outbound.length !== 1 ? "s" : ""}`}
-                  </div>
-                  {tracks && (
-                    <div className="stream-tracks" style={{ textAlign: "center", marginBottom: "1rem" }}>
-                      {tracks.map(formatTrack).join("  ·  ")}
+                <section key={`combined-${stream.id}`} className="card stream-block">
+                  <div className="stream-head stream-plaque">
+                    <span
+                      className="plaque-dot"
+                      style={{ backgroundColor: healthTone(worstHealth) }}
+                    />
+                    <div className="plaque-main">
+                      <h3 className="stream-title">{stream.id}</h3>
+                      <div className="stream-meta">{metaParts.join(" · ")}</div>
                     </div>
-                  )}
-                  {allItems.length > 0 && renderStreamTable(allItems, stream.inbound)}
+                    <div className="plaque-stats">
+                      <div className="plaque-bitrate">
+                        {formatBitrate(stream.inbound?.rx_bps ?? 0)}
+                      </div>
+                      <div className="plaque-cap">
+                        in · <span style={{ color: healthTone(worstHealth) }}>{worstHealth}%</span>
+                      </div>
+                    </div>
+                  </div>
                   <StreamBandwidthChart
                     streamId={stream.id}
                     history={bandwidthHistory[stream.id] || []}
                     inbound={stream.inbound}
                     outbound={stream.outbound}
                   />
-                </div>
+                  {allItems.length > 0 && renderStreamTable(allItems, stream.inbound)}
+                </section>
               );
             })}
-          </section>
-        )}
 
-        {orphanRtmp.length > 0 && (
+        {(orphanRtmp.length > 0 || orphanSrt.length > 0) && (
           <section className="card health-card">
             <div className="health-status-row">
               <div>
-                <div className="card-title">Unassociated RTMP Connections</div>
+                <div className="card-title">Unassociated Connections</div>
                 <div className="card-subtitle">Connections not matched to a logical stream</div>
               </div>
             </div>
-            {renderStreamTable(orphanRtmp, null)}
-          </section>
-        )}
-
-        {orphanSrt.length > 0 && (
-          <section className="card health-card">
-            <div className="health-status-row">
-              <div>
-                <div className="card-title">Unassociated SRT Connections</div>
-                <div className="card-subtitle">Connections not matched to a logical stream</div>
-              </div>
-            </div>
-            {renderStreamTable(orphanSrt, null)}
+            {orphanRtmp.length > 0 && (
+              <>
+                <div className="stream-subhead">RTMP</div>
+                {renderStreamTable(orphanRtmp, null)}
+              </>
+            )}
+            {orphanSrt.length > 0 && (
+              <>
+                <div className="stream-subhead">SRT</div>
+                {renderStreamTable(orphanSrt, null)}
+              </>
+            )}
           </section>
         )}
 
         <section className="card event-log-card">
-          <div className="health-status-row">
+          <div className="health-status-row log-head">
             <div>
-              <div className="card-title">Event Log</div>
+              <div className="card-title">Event stream</div>
               <div className="card-subtitle">
-                {eventLog.length} event{eventLog.length !== 1 ? "s" : ""} recorded
+                {logFilter === "all"
+                  ? `${eventLog.length} event${eventLog.length !== 1 ? "s" : ""} recorded`
+                  : `${filteredLog.length} of ${eventLog.length} shown`}
               </div>
             </div>
             <div className={`status-badge ${isStickyRef.current ? "running" : ""}`}>
@@ -490,14 +440,44 @@ export function Monitor() {
               <span>{isStickyRef.current ? "auto-scroll active" : "auto-scroll paused"}</span>
             </div>
           </div>
+          <div className="chart-btn-group log-filters">
+            <button
+              type="button"
+              className={`chart-btn ${logFilter === "all" ? "active" : ""}`}
+              onClick={() => setLogFilter("all")}
+            >
+              All {eventLog.length}
+            </button>
+            <button
+              type="button"
+              className={`chart-btn ${logFilter === "streams" ? "active" : ""}`}
+              onClick={() => setLogFilter("streams")}
+            >
+              Streams {streamCount}
+            </button>
+            <button
+              type="button"
+              className={`chart-btn ${logFilter === "targets" ? "active" : ""}`}
+              onClick={() => setLogFilter("targets")}
+            >
+              Targets {targetCount}
+            </button>
+            <button
+              type="button"
+              className={`chart-btn ${logFilter === "quality" ? "active" : ""}`}
+              onClick={() => setLogFilter("quality")}
+            >
+              Quality {qualityCount}
+            </button>
+          </div>
           <div className="event-log-container" ref={logContainerRef} onScroll={handleLogScroll}>
-            {eventLog.length === 0 ? (
+            {filteredLog.length === 0 ? (
               <div className="health-empty" style={{ padding: "2rem" }}>
-                No events yet.
+                {eventLog.length === 0 ? "No events yet." : "Nothing in this group."}
               </div>
             ) : (
-              eventLog.map((event, idx) => (
-                <div key={event.seq || idx} className="event-log-entry">
+              filteredLog.map((event, idx) => (
+                <div key={event.seq || idx} className={`event-log-entry sev-${eventSev(event.type)}`}>
                   <div className="event-log-timestamp">{formatEventTime(event.timestamp)}</div>
                   <div className={`event-log-type ${eventTypeClass(event.type)}`}>
                     {event.type === "stream_start" || event.type === "target_connected" ? "● " : ""}

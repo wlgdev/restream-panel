@@ -438,6 +438,7 @@ export class RtmpGrouping {
           inbound: null,
           outbound: [],
           tracks: this.tracks?.getTracks(metric.stream_id) ?? undefined,
+          readers: this.tracks?.getReaders?.(metric.stream_id),
         });
       }
 

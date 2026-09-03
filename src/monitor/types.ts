@@ -12,6 +12,7 @@ export interface LogicalStream {
   inbound: MonitorConnection | null;
   outbound: MonitorConnection[];
   tracks?: Track[];
+  readers?: number;
 }
 
 // Full monitor frame pushed to SSE subscribers every tick.
@@ -29,4 +30,5 @@ export interface MonitorSnapshot {
 export interface TrackSource {
   ensurePaths(paths: Iterable<string>): Promise<void>;
   getTracks(path: string): Track[] | undefined;
+  getReaders?(path: string): number | undefined;
 }

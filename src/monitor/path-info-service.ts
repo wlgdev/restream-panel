@@ -1,10 +1,11 @@
 import type { Track } from "../core/types";
 
 // A single record from mediamtx GET /v3/paths/list -> items[]. The fields we read are
-// `name` and `tracks2`; everything else (source, readers, bytes, ...) is dropped.
+// `name`, `tracks2` and `readers`; everything else (source, bytes, ...) is dropped.
 interface PathListItem {
   name: string;
   tracks2?: Array<{ codec: string; codecProps?: Track["codecProps"] }>;
+  readers?: unknown[];
 }
 
 interface PathsListResponse {
@@ -61,6 +62,7 @@ export class PathInfoService {
   private readonly now: () => number;
 
   private readonly cache = new Map<string, Track[]>();
+  private readonly readersCache = new Map<string, number>();
   private pending: Promise<void> | null = null;
   private everFetched = false;
   private lastFetchAt = 0;
@@ -109,6 +111,12 @@ export class PathInfoService {
   // and [] for known-but-trackless paths (callers render nothing for either).
   public getTracks(path: string): Track[] | undefined {
     return this.cache.get(path);
+  }
+
+  // Reader (viewer/consumer) count from the same /v3/paths/list payload.
+  // Undefined when the path was never listed or the response had no readers array.
+  public getReaders(path: string): number | undefined {
+    return this.readersCache.get(path);
   }
 
   // Fetch when we never have, or when a requested name is unknown — and, crucially, when a
@@ -160,6 +168,9 @@ export class PathInfoService {
       // Overwrite on every fetch so a re-fetch (triggered by a newly-seen path or the
       // empty-refetch throttle) refreshes tracks that may have populated since the last pull.
       this.cache.set(item.name, tracks);
+      if (Array.isArray(item.readers)) {
+        this.readersCache.set(item.name, item.readers.length);
+      }
     }
   }
 

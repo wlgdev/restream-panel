@@ -133,6 +133,10 @@ export class SrtGrouping {
     return this.collector.getTracks(path);
   }
 
+  public getReaders(path: string) {
+    return this.collector.getReaders(path);
+  }
+
   private syncActiveStreams(metrics: SrtMetrics[]): void {
     const now = this.now();
     const currentStreamIds = new Set<string>();
@@ -193,6 +197,7 @@ export class SrtGrouping {
           inbound: null,
           outbound: [],
           tracks: this.collector.getTracks(metric.stream_id) ?? undefined,
+          readers: this.collector.getReaders(metric.stream_id),
         });
       }
 

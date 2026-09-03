@@ -35,3 +35,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .bun-cache
 
 TASK.md
+
+.agents
+.claude
+skills-lock.json

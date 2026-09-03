@@ -42,6 +42,7 @@ export interface LogicalStreamItem {
   inbound: ConnectionItem | null;
   outbound: ConnectionItem[];
   tracks?: Track[];
+  readers?: number;
 }
 
 // Full monitor frame pushed over SSE every tick: logical streams already merged
