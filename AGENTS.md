@@ -20,8 +20,10 @@ mediamtx (RTMP/SRT), mediamtx раздаёт/форвардит наружу. П
   `srt-grouping.ts` — группировка в логические стримы, `merge-streams.ts` —
   слияние rtmp+srt по id на сервере); `event-log.ts`, `bandwidth-log.ts`,
   `path-info-service.ts`, `net-addr.ts`.
-- `src/api/` — `Bun.serve({ routes })`, SSE `GET /api/monitor/stream` (полный снапшот
-  каждые ~5с), `GET /api/system/status` (auth-проба для Login).
+- `src/api/` — `Bun.serve({ routes })`, SSE `GET /api/monitor/stream` (первый кадр —
+  полный снапшот, дальше каждые ~5с только дельты: свежие точки bandwidth +
+  свежие события; клиент мержит в `Monitor` через `web/lib/monitor-merge.ts`),
+  `GET /api/system/status` (auth-проба для Login).
 - `src/web/` — страницы `Monitor` (корень `/`) и `Login`.
 - `src/core/` — общие типы (`Track`, `BandwidthPoint`, `StreamEvent`).
 

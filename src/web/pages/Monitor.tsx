@@ -1,11 +1,13 @@
 import React, { useEffect, useState, useRef } from "react";
 import type {
   MonitorSnapshot,
+  MonitorFrame,
   ConnectionItem,
   StreamEvent,
 } from "../types";
 import type { BandwidthPoint } from "../../core/types";
 import { StreamBandwidthChart } from "../components/StreamBandwidthChart";
+import { mergeBandwidthHistory, mergeEventLog } from "../lib/monitor-merge";
 import {
   eventDescription,
   eventTypeClass,
@@ -63,23 +65,42 @@ export function Monitor() {
   const [lastFrameAt, setLastFrameAt] = useState<number | null>(null);
   const [nowTs, setNowTs] = useState(() => Date.now());
 
-  // Each SSE frame carries the full snapshot (streams, full event buffer, full
-  // retained bandwidth history), so state is replaced, never merged.
+  // The first SSE frame is a full snapshot; the rest are deltas (fresh
+  // bandwidth points + fresh events). Histories are merged, never replaced,
+  // so the client keeps the full 4h window without re-downloading it.
   useEffect(() => {
     const source = new EventSource("/api/monitor/stream");
 
     source.onmessage = (event) => {
-      let data: MonitorSnapshot;
+      let data: MonitorFrame;
       try {
-        data = JSON.parse(event.data) as MonitorSnapshot;
+        data = JSON.parse(event.data) as MonitorFrame;
       } catch {
         setConnError("Invalid monitor frame.");
         return;
       }
 
-      setSnapshot(data);
-      setBandwidthHistory(data.bandwidth ?? {});
-      setEventLog(data.events ?? []);
+      // Streams/orphans/errors are always full in every frame — small enough.
+      const slim: MonitorSnapshot = {
+        streams: data.streams,
+        orphans: data.orphans,
+        events: [],
+        bandwidth: {},
+        errors: data.errors,
+        timestamp: data.timestamp,
+      };
+      setSnapshot(slim);
+
+      if (data.full) {
+        setBandwidthHistory(data.bandwidth ?? {});
+        setEventLog(data.events ?? []);
+      } else {
+        const deltaBandwidth = data.bandwidth ?? {};
+        const deltaEvents = data.events ?? [];
+        const liveKeys = data.bandwidthKeys ?? [];
+        setBandwidthHistory((prev) => mergeBandwidthHistory(prev, deltaBandwidth, liveKeys));
+        setEventLog((prev) => mergeEventLog(prev, deltaEvents));
+      }
 
       if (isStickyRef.current && logContainerRef.current) {
         setTimeout(() => {

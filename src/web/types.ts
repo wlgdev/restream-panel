@@ -55,3 +55,19 @@ export interface MonitorSnapshot {
   errors: string[];
   timestamp: string;
 }
+
+// What actually arrives over SSE. The first frame of a connection is a full
+// snapshot (full: true); the rest are deltas — fresh bandwidth points and
+// events to merge into local state (see lib/monitor-merge). bandwidthKeys is
+// the authoritative id list of the server-side bandwidth log; local
+// per-stream histories missing from it were evicted and must be dropped.
+export interface MonitorFrame {
+  streams: LogicalStreamItem[];
+  orphans: ConnectionItem[];
+  events: StreamEvent[];
+  bandwidth?: Record<string, BandwidthPoint[]>;
+  errors: string[];
+  timestamp: string;
+  full: boolean;
+  bandwidthKeys: string[];
+}

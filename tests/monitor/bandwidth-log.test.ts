@@ -127,6 +127,50 @@ describe("StreamBandwidthLog", () => {
     expect(empty["s1"]?.length).toBe(0);
   });
 
+  test("evictIdle drops streams with no points for longer than the TTL", () => {
+    const log = new StreamBandwidthLog();
+
+    log.recordPoint("live", { time: 1000, inboundBps: 1, outbounds: {} });
+    log.recordPoint("dead", { time: 1000, inboundBps: 1, outbounds: {} });
+    log.recordPoint("live", { time: 2000, inboundBps: 2, outbounds: {} });
+
+    // "dead" last seen at t=1000, "live" at t=2000; TTL 500 at now=2000.
+    const evicted = log.evictIdle(2000, 500);
+
+    expect(evicted).toEqual(["dead"]);
+    expect(log.keys().sort()).toEqual(["live"]);
+    expect(log.getSince()["dead"]).toBeUndefined();
+    expect(log.getSince()["live"]?.length).toBe(2);
+  });
+
+  test("evictIdle with default TTL keeps a recently finished stream viewable", () => {
+    const log = new StreamBandwidthLog();
+    const end = 1710000000;
+
+    log.recordPoint("ended", { time: end, inboundBps: 1, outbounds: {} });
+
+    // 1h after the end — still there (default TTL is the 4h retention).
+    expect(log.evictIdle(end + 3600)).toEqual([]);
+    expect(log.keys()).toEqual(["ended"]);
+
+    // Past the TTL — gone.
+    expect(log.evictIdle(end + 14401)).toEqual(["ended"]);
+    expect(log.keys()).toEqual([]);
+  });
+
+  test("retention cutoff prunes stale points of an active stream", () => {
+    const log = new StreamBandwidthLog();
+    const start = 1710000000;
+
+    log.recordPoint("s1", { time: start, inboundBps: 1, outbounds: {} });
+    log.recordPoint("s1", { time: start + 14400 + 5, inboundBps: 2, outbounds: {} });
+
+    const points = log.getSince()["s1"]!;
+    expect(points.length).toBe(1);
+    expect(points[0]?.time).toBe(start + 14400 + 5);
+    expect(log.keys()).toEqual(["s1"]);
+  });
+
   test("caps buffer at 2880 points (4 hours) and prunes older points", () => {
     const log = new StreamBandwidthLog();
     const startTime = 1710000000;

@@ -61,6 +61,11 @@ export class MonitorManager {
       ...(srt.success ? srt.data.filter((metric) => !metric.stream_id) : []),
     ];
 
+    // Finished streams stop receiving points (groupings only record active
+    // ones), so sweep idle ids here — otherwise the log (and the SSE key
+    // list derived from it) grows with every stream that ever existed.
+    this.streamBandwidthLog.evictIdle(Math.floor(Date.now() / 1000));
+
     this.lastSnapshot = {
       streams,
       orphans,
@@ -82,6 +87,12 @@ export class MonitorManager {
 
   public getBandwidthSince(sinceTime?: number): Record<string, BandwidthPoint[]> {
     return this.streamBandwidthLog.getSince(sinceTime);
+  }
+
+  // Authoritative id list for the bandwidth log. Delta-frame clients drop
+  // local per-stream histories missing from this list (evicted idle streams).
+  public getBandwidthKeys(): string[] {
+    return this.streamBandwidthLog.keys();
   }
 
   public startBackgroundPolling(): void {

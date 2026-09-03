@@ -19,7 +19,14 @@ export interface StreamBandwidthSource {
 export class StreamBandwidthLog {
   private static readonly MAX_POINTS_PER_STREAM = 2880;
   private static readonly RETENTION_SECONDS = 14400;
+  // A stream that received no points for longer than this is considered
+  // finished: its history stays viewable until retention prunes it, then the
+  // key itself is dropped so the map (and every SSE frame key list) does not
+  // grow forever. Default equals retention: a finished stream remains
+  // inspectable for the full 4h window after its last point.
+  private static readonly IDLE_TTL_SECONDS = StreamBandwidthLog.RETENTION_SECONDS;
   private readonly history = new Map<string, BandwidthPoint[]>();
+  private readonly lastSeen = new Map<string, number>();
 
   public recordStreams(streams: StreamBandwidthSource[], timestampSec?: number): void {
     const time = timestampSec ?? Math.floor(Date.now() / 1000);
@@ -49,6 +56,7 @@ export class StreamBandwidthLog {
       list = [];
       this.history.set(streamId, list);
     }
+    this.lastSeen.set(streamId, point.time);
 
     const lastPoint = list[list.length - 1];
     if (lastPoint && Math.abs(lastPoint.time - point.time) <= 2) {
@@ -73,6 +81,24 @@ export class StreamBandwidthLog {
     if (list.length > StreamBandwidthLog.MAX_POINTS_PER_STREAM) {
       list.splice(0, list.length - StreamBandwidthLog.MAX_POINTS_PER_STREAM);
     }
+  }
+
+  // Drops streams idle for longer than ttlSec (no points recorded).
+  // Returns the evicted ids. Called once per monitor tick.
+  public evictIdle(nowSec: number, ttlSec: number = StreamBandwidthLog.IDLE_TTL_SECONDS): string[] {
+    const evicted: string[] = [];
+    for (const [streamId, seenAt] of this.lastSeen) {
+      if (nowSec - seenAt > ttlSec) {
+        this.history.delete(streamId);
+        this.lastSeen.delete(streamId);
+        evicted.push(streamId);
+      }
+    }
+    return evicted;
+  }
+
+  public keys(): string[] {
+    return [...this.history.keys()];
   }
 
   public getSince(sinceTime?: number): Record<string, BandwidthPoint[]> {

@@ -15,7 +15,7 @@ export interface LogicalStream {
   readers?: number;
 }
 
-// Full monitor frame pushed to SSE subscribers every tick.
+// Full monitor frame produced by each monitor tick.
 export interface MonitorSnapshot {
   streams: LogicalStream[];
   orphans: MonitorConnection[];
@@ -23,6 +23,23 @@ export interface MonitorSnapshot {
   bandwidth: Record<string, BandwidthPoint[]>;
   errors: string[];
   timestamp: string;
+}
+
+// What actually goes over SSE. The first frame of a connection is a full
+// snapshot (full: true); every following frame carries only what changed
+// since the previous one: fresh bandwidth points, fresh events, and the
+// current stream/orphan/error state (small and cheap to resend whole).
+// bandwidthKeys is the authoritative id list of the server-side bandwidth
+// log — clients drop local histories missing from it (evicted idle streams).
+export interface MonitorFrame {
+  streams: LogicalStream[];
+  orphans: MonitorConnection[];
+  events: StreamEvent[];
+  bandwidth: Record<string, BandwidthPoint[]>;
+  errors: string[];
+  timestamp: string;
+  full: boolean;
+  bandwidthKeys: string[];
 }
 
 // Track metadata source for grouping. Satisfied structurally by both
