@@ -56,7 +56,7 @@ The panel is read-only: it never edits server configuration.
 ### Prerequisites
 
 - [Bun](https://bun.sh/) version 1.4+
-- A local or remote MediaMTX with API enabled (`/metrics`, `/v3/paths/list`).
+- A local or remote MediaMTX with API enabled (`/metrics`, `/v3/paths/get/*`, `/v3/paths/forward-dests/get`).
   On Linux, `ss -itnop` is used for RTMP TCP metrics.
 
 ### Installation

@@ -1,8 +1,7 @@
 import { createApiServer } from "./api";
 import { loadConfig } from "./config";
 import { test_vk } from "../mocks/ss";
-import { srtAndForward1, srtAndForward2, srtAndForward3 } from "../mocks/srt";
-import { pathes } from "../mocks/srt";
+import { metrics1, metrics2, metrics3, pathGetTest, forwardGetTest } from "../mocks/srt";
 import { join } from "path";
 import { StreamEventLog } from "./monitor/event-log";
 import { StreamBandwidthLog } from "./monitor/bandwidth-log";
@@ -20,10 +19,24 @@ const sharedBandwidthLog = new StreamBandwidthLog();
 
 const srtGrouping = new SrtGrouping({
   useMockData,
-  mockOutputs: [srtAndForward1, srtAndForward2, srtAndForward3],
+  mockOutputs: [metrics1, metrics2, metrics3],
   eventLog: sharedEventLog,
   streamBandwidthLog: sharedBandwidthLog,
-  pathInfo: useMockData ? { useMockData, mockOutput: pathes } : undefined,
+  // Forward id is the one mediamtx reports in /metrics; mockForwards is keyed "path:id".
+  // The ss fixture dials 185.226.53.77:1935 (VK) while the verbatim snapshot forward peer
+  // is 45.136.22.81 — remapped so the mock demo keeps a merged stream, like production
+  // where both sides come from the same server.
+  pathInfo: useMockData
+    ? {
+        mockPaths: { test: pathGetTest },
+        mockForwards: {
+          "test:5935aa57-d38d-4ac9-8df4-c534f0a9a72d": forwardGetTest.replace(
+            "45.136.22.81:1935",
+            "185.226.53.77:1935",
+          ),
+        },
+      }
+    : undefined,
 });
 const rtmpGrouping = new RtmpGrouping({
   useMockData,

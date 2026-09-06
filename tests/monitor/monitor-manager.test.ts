@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { test_vk } from "../../mocks/ss";
-import { srtAndForward1, srtNull } from "../../mocks/srt";
+import { metrics1, srtNull, pathGetTest, forwardGetTest } from "../../mocks/srt";
+
+// The ss fixture dials 185.226.53.77:1935 (VK); the verbatim snapshot forward peer is
+// 45.136.22.81 — remapped here so the forward map correlates with the ss side.
+const forwardGetVk = forwardGetTest.replace("45.136.22.81:1935", "185.226.53.77:1935");
 import { StreamBandwidthLog } from "../../src/monitor/bandwidth-log";
 import { StreamEventLog } from "../../src/monitor/event-log";
 import { RtmpGrouping } from "../../src/monitor/grouping/rtmp-grouping";
@@ -33,6 +37,11 @@ describe("MonitorManager", () => {
     const srtGrouping = new SrtGrouping({
       useMockData: true,
       mockOutputs: [srtOutput],
+      // Forward id is the one mediamtx reports in /metrics; mockForwards is keyed "path:id".
+      pathInfo: {
+        mockPaths: { test: pathGetTest },
+        mockForwards: { "test:5935aa57-d38d-4ac9-8df4-c534f0a9a72d": forwardGetVk },
+      },
       eventLog,
       streamBandwidthLog,
     });
@@ -49,7 +58,7 @@ describe("MonitorManager", () => {
   };
 
   test("tick returns a unified frame with server-merged streams", async () => {
-    const manager = buildManager(test_vk, srtAndForward1);
+    const manager = buildManager(test_vk, metrics1);
     const snapshot = await manager.tick();
 
     expect(snapshot.errors).toEqual([]);

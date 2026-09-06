@@ -43,7 +43,7 @@ export interface MonitorFrame {
 }
 
 // Track metadata source for grouping. Satisfied structurally by both
-// PathInfoService and SrtGrouping (which delegates to its collector).
+// MediamtxCollector and SrtGrouping (which delegates to its collector).
 export interface TrackSource {
   ensurePaths(paths: Iterable<string>): Promise<void>;
   getTracks(path: string): Track[] | undefined;

@@ -10,7 +10,10 @@ mediamtx (RTMP/SRT), mediamtx раздаёт/форвардит наружу. П
 
 - `ss -itnop` — TCP-сокеты RTMP (рейты, RTT, ретрансмиты, очереди);
 - `GET mediamtx /metrics` — SRT-соединения, forward_dests, rtmp_conns;
-- `GET mediamtx /v3/paths/list` — кодеки/треки путей.
+- `GET mediamtx /v3/paths/get/{name}` — кодеки/треки активного пути + availableTime
+  (реальный старт стрима; ready/readyTime deprecated, online — про хуки/сорс);
+- `GET mediamtx /v3/paths/forward-dests/get?path=&id=` — remoteAddr активного форварда
+  (/metrics его больше не отдаёт даже при forwarding).
 
 ## Структура
 
@@ -19,7 +22,7 @@ mediamtx (RTMP/SRT), mediamtx раздаёт/форвардит наружу. П
   + треки путей, `rtmp-target-resolver.ts`); `grouping/` (`rtmp-grouping.ts`,
   `srt-grouping.ts` — группировка в логические стримы, `merge-streams.ts` —
   слияние rtmp+srt по id на сервере); `event-log.ts`, `bandwidth-log.ts`,
-  `path-info-service.ts`, `net-addr.ts`.
+  `net-addr.ts`.
 - `src/api/` — `Bun.serve({ routes })`, SSE `GET /api/monitor/stream` (первый кадр —
   полный снапшот, дальше каждые ~5с только дельты: свежие точки bandwidth +
   свежие события; клиент мержит в `Monitor` через `web/lib/monitor-merge.ts`),

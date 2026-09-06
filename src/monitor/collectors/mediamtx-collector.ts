@@ -1,8 +1,23 @@
 import { isLoopbackRemote } from "../net-addr";
-import { PathInfoService, type PathInfoServiceOptions } from "../path-info-service";
 import type { Track } from "../../core/types";
 
-export type PathInfoOptions = PathInfoServiceOptions;
+// Options for the mediamtx control-API добивка (per-path GETs). Everything mediamtx
+// lives in this collector; grouping layers only call ensurePaths/getTracks/getReaders.
+export interface PathInfoOptions {
+  // Base URL of the mediamtx control API. Defaults to the standard local port.
+  controlBase?: string;
+  // Injectable fetches used in tests / for mock overrides.
+  pathFetcher?: (path: string) => Promise<FetchResult>;
+  forwardFetcher?: (path: string, id: string) => Promise<FetchResult>;
+  // Static fixtures served instead of the network when the collector runs with
+  // useMockData (mirrors the metrics mockOutputs flag). mockForwards is keyed
+  // "path:id"; a missing key behaves like a failed fetch, never the network.
+  mockPaths?: Record<string, string>;
+  mockForwards?: Record<string, string>;
+  // Minimum time between refetches of a path cached empty (mediamtx hadn't parsed
+  // `tracks2` yet on the first fetch). Defaults to 20s.
+  emptyRefetchIntervalMs?: number;
+}
 
 export interface SrtMetrics {
   protocol: "SRT" | "SRTLA";
@@ -40,7 +55,7 @@ export interface SrtMetrics {
 interface RawSrtMetric {
   id: string;
   path: string;
-  remoteAddr: string;
+  remoteAddr: string | null;
   state: string;
   metrics: Record<string, number>;
 }
@@ -49,7 +64,6 @@ interface ForwardDest {
   id: string;
   path: string;
   protocol: string;
-  remoteAddr: string | null;
   state: string;
 }
 
@@ -95,6 +109,30 @@ interface MockOutput {
   elapsedMs?: number;
 }
 
+// A single record from mediamtx GET /v3/paths/get/{name}. Only `tracks2`,
+// `readers` and the availability timestamp are read; everything else (source,
+// bytes, ...) is dropped.
+interface PathGetResponse {
+  tracks2?: Array<{ codec: string; codecProps?: Track["codecProps"] }>;
+  readers?: unknown[];
+  // availableTime marks when the stream became available (publisher connected).
+  // readyTime is its deprecated predecessor, kept as a fallback for older servers.
+  availableTime?: string | null;
+  readyTime?: string | null;
+}
+
+// A single record from GET /v3/paths/forward-dests/get?path=&id=. Only the live
+// socket address is read; mediamtx no longer emits remoteAddr in /metrics even
+// while forwarding, so this is the sole source of forward correlation.
+interface ForwardGetResponse {
+  typeSpecific?: { remoteAddr?: string };
+}
+
+interface FetchResult {
+  ok: boolean;
+  text: string;
+}
+
 export type MediamtxCollectResult =
   | {
       success: true;
@@ -113,9 +151,15 @@ export interface MediamtxCollectorOptions {
 }
 
 // The single source of everything mediamtx: per-tick /metrics (SRT connections,
-// forward destinations, RTMP publisher correlation) plus cached /v3/paths/list track
-// metadata. Stateless across ticks except for the rolling health windows. Grouping,
-// events and snapshots stay in the grouping layer.
+// forward destinations, RTMP publisher correlation) plus on-demand /v3 path and
+// forward details. Steady-state polling stays on /metrics; a path that becomes
+// active gets one GET /v3/paths/get/{name} for tracks/readers/stream start, and each active
+// (non-idle) forward gets one GET /v3/paths/forward-dests/get?path=&id= for its
+// remoteAddr. A forward reconnect mints a fresh mediamtx id, which arrives as a
+// cache miss and is refetched automatically; entries whose id vanished from
+// /metrics are evicted on the same tick. Stateless across ticks except for the
+// rolling health windows and these small caches. Grouping, events and snapshots
+// stay in the grouping layer.
 export class MediamtxCollector {
   private static readonly RATE_WINDOW_SAMPLE_COUNT = 4;
   private static readonly RTT_WINDOW_SAMPLE_COUNT = 6;
@@ -125,33 +169,75 @@ export class MediamtxCollector {
   private mockIndex = 0;
   private pendingMockElapsedMs: number | null = null;
 
+  // Per-path details from /v3/paths/get/{name}. A name cached with tracks never
+  // refetches on its own; populated entries are dropped when the path goes quiet
+  // or republishes (see evictDeadPaths/trackPublishConnections) so the next
+  // ensurePaths pulls fresh tracks and a fresh availableTime.
+  private readonly pathCache = new Map<string, Track[]>();
+  private readonly readersCache = new Map<string, number>();
+  private readonly startedAtCache = new Map<string, number>();
+  // Publish connection id per path from /metrics. A republish mints a fresh id on
+  // the same path, which is the only signal that availableTime changed while the
+  // path never left /metrics.
+  private readonly pathPublishConn = new Map<string, string>();
+  // Forward remoteAddr by "path:id" from forward-dests/get. Keyed by the mediamtx
+  // forward id so a reconnect (new id) refetches instead of reusing a stale peer.
+  private readonly forwardCache = new Map<string, string | null>();
+  private readonly pendingPath = new Map<string, Promise<void>>();
+  private readonly pendingForward = new Map<string, Promise<void>>();
+  private lastFetchAt = 0;
+
   private readonly metricsFetcher: () => Promise<CommandExecutionResult>;
   private readonly now: () => number;
   private readonly useMockData: boolean;
   private readonly mockOutputs: Array<string | MockOutput>;
-  private readonly pathInfo: PathInfoService;
+  private readonly controlBase: string;
+  private readonly pathFetcher?: (path: string) => Promise<FetchResult>;
+  private readonly forwardFetcher?: (path: string, id: string) => Promise<FetchResult>;
+  private readonly mockPaths: Record<string, string>;
+  private readonly mockForwards: Record<string, string>;
+  private readonly emptyRefetchIntervalMs: number;
 
   public constructor(options: MediamtxCollectorOptions = {}) {
     this.metricsFetcher = options.metricsFetcher ?? MediamtxCollector.fetchMetrics;
     this.now = options.now ?? Date.now;
     this.useMockData = options.useMockData ?? false;
     this.mockOutputs = options.mockOutputs ?? [];
-    this.pathInfo = new PathInfoService({
-      ...options.pathInfo,
-      now: options.pathInfo?.now ?? options.now,
-    });
+    this.controlBase = options.pathInfo?.controlBase ?? "http://localhost:9997";
+    this.pathFetcher = options.pathInfo?.pathFetcher;
+    this.forwardFetcher = options.pathInfo?.forwardFetcher;
+    this.mockPaths = options.pathInfo?.mockPaths ?? {};
+    this.mockForwards = options.pathInfo?.mockForwards ?? {};
+    this.emptyRefetchIntervalMs = options.pathInfo?.emptyRefetchIntervalMs ?? 20000;
   }
 
-  public ensurePaths(paths: Iterable<string>): Promise<void> {
-    return this.pathInfo.ensurePaths(paths);
+  // Make sure track info for the given paths is in the cache. A name cached with
+  // tracks never refetches; a name cached empty refetches once the throttle
+  // window has elapsed so codec info self-heals when mediamtx populates tracks2
+  // after our first (racing) fetch. Failures cache empty and retry next window.
+  public async ensurePaths(paths: Iterable<string>): Promise<void> {
+    const requested = new Set(paths);
+    if (requested.size === 0) return;
+    await Promise.all([...requested].map((name) => this.ensurePath(name)));
   }
 
+  // Synchronous cache lookup; returns undefined for paths we've never been asked about,
+  // and [] for known-but-trackless paths (callers render nothing for either).
   public getTracks(path: string): Track[] | undefined {
-    return this.pathInfo.getTracks(path);
+    return this.pathCache.get(path);
   }
 
+  // Reader (viewer/consumer) count from the same per-path payload.
+  // Undefined when the path was never fetched or the response had no readers array.
   public getReaders(path: string): number | undefined {
-    return this.pathInfo.getReaders(path);
+    return this.readersCache.get(path);
+  }
+
+  // Real stream start from mediamtx (paths/get availableTime). Null when the path
+  // was never fetched, isn't available, or carried no parseable timestamp;
+  // callers fall back to first-sight time.
+  public getStartedAt(path: string): number | null {
+    return this.startedAtCache.get(path) ?? null;
   }
 
   public async collect(): Promise<MediamtxCollectResult> {
@@ -166,10 +252,16 @@ export class MediamtxCollector {
 
     try {
       const rawData = this.parse(commandResult.stdout);
+      this.evictDeadConnections(rawData.map((raw) => raw.id));
       const srtlaPaths = this.parseSrtlaPaths(commandResult.stdout);
+      const dests = this.parseForwardDestinations(commandResult.stdout);
+      const rtmpConns = this.parseRtmpConnections(commandResult.stdout);
+      this.trackPublishConnections(rawData, rtmpConns);
+      this.evictDeadPaths(MediamtxCollector.collectActivePaths(rawData, dests, rtmpConns));
+      await this.ensureForwards(dests);
       const metrics = rawData.map((raw) => this.calculateHealth(raw, srtlaPaths));
-      const forwardMap = this.buildForwardMap(this.parseForwardDestinations(commandResult.stdout));
-      const publishMap = this.buildPublishMap(this.parseRtmpConnections(commandResult.stdout));
+      const forwardMap = this.buildForwardMap(dests);
+      const publishMap = this.buildPublishMap(rtmpConns);
 
       return { success: true, metrics, forwardMap, publishMap };
     } catch (error) {
@@ -178,6 +270,41 @@ export class MediamtxCollector {
         error: `Failed to parse SRT metrics: ${error instanceof Error ? error.message : "Unknown error"}`,
       };
     }
+  }
+
+  // Parse `key="value"` pairs out of a `{...}` label segment into a dict, so the
+  // parsers below don't pin label order or presence: mediamtx adds labels (pos,
+  // type) and deprecates others (remoteAddr, protocol) across versions, and a
+  // positional regex silently drops the whole connection when the shape shifts.
+  private static parseLabels(segment: string): Record<string, string> {
+    const labels: Record<string, string> = {};
+    for (const match of segment.matchAll(/(\w+)="([^"]*)"/g)) {
+      labels[match[1]!] = match[2]!;
+    }
+    return labels;
+  }
+
+  // Paths with anything worth keeping per-path details for: SRT connections,
+  // actively-forwarding destinations, and RTMP connections (publishers and
+  // readers alike — a watched path stays watched).
+  private static collectActivePaths(
+    raw: RawSrtMetric[],
+    dests: ForwardDest[],
+    rtmpConns: RtmpConn[],
+  ): Set<string> {
+    const active = new Set<string>();
+    for (const conn of raw) active.add(conn.path);
+    for (const dest of dests) {
+      if (dest.state !== "idle") active.add(dest.path);
+    }
+    for (const conn of rtmpConns) active.add(conn.path);
+    return active;
+  }
+
+  private static parseTime(value: unknown): number | null {
+    if (typeof value !== "string" || !value) return null;
+    const ms = Date.parse(value);
+    return Number.isNaN(ms) ? null : ms;
   }
 
   public parse(output: string): RawSrtMetric[] {
@@ -191,26 +318,28 @@ export class MediamtxCollector {
       // same label shape (id/path/remoteAddr/state); the bare [a-z_]+ prefix would treat an
       // internal RTMP reader (e.g. remoteAddr="127.0.0.1:...") as a bogus SRT outbound with
       // all-zero metrics. Pin the prefix to srt_conns so non-SRT connection metrics are ignored.
-      const match = line.match(
-        /^(srt_conns[a-z_]*)\{id="([^"]+)",path="([^"]+)",remoteAddr="([^"]+)",state="([^"]+)"\}\s+([0-9.\-e+]+)/,
-      );
+      const match = line.match(/^(srt_conns[a-z_]*)\{([^}]*)\}\s+([0-9.\-e+]+)/);
 
       if (!match) {
         continue;
       }
 
       const metricName = match[1]!;
-      const id = match[2]!;
-      const path = match[3]!;
-      const remoteAddr = match[4]!;
-      const state = match[5]!;
-      const value = parseFloat(match[6]!);
+      const labels = MediamtxCollector.parseLabels(match[2]!);
+      const id = labels["id"];
+      const path = labels["path"];
+      const state = labels["state"];
+      // Derivative counters share the base line's labels; skip label-less aggregates.
+      if (!id || !path || !state) continue;
+      const value = parseFloat(match[3]!);
 
       if (!connections.has(id)) {
         connections.set(id, {
           id,
           path,
-          remoteAddr,
+          // remoteAddr is deprecated upstream and may vanish; a connection without one
+          // is still counted, with a null peer.
+          remoteAddr: labels["remoteAddr"] ?? null,
           state,
           metrics: {},
         });
@@ -246,22 +375,25 @@ export class MediamtxCollector {
 
     for (const line of output.split("\n")) {
       // Only the base counter line starts with `forward_dests{`; skip derivatives like
-      // `forward_dests_outbound_bytes{...}`. remoteAddr is only emitted while the forward
-      // is actually forwarding, so it may be absent (state="idle").
-      const match = line.match(
-        /^forward_dests\{id="([^"]+)",path="([^"]+)",protocol="([^"]+)"(?:,remoteAddr="([^"]+)")?,state="([^"]+)"\}\s+\d+/,
-      );
+      // `forward_dests_outbound_bytes{...}`. The `protocol` label is deprecated and
+      // superseded by `type`; `pos` is ignored. remoteAddr is NOT read here even when
+      // present: current mediamtx omits it from /metrics entirely (even while
+      // forwarding) and the live socket comes from forward-dests/get instead.
+      const match = line.match(/^forward_dests\{([^}]*)\}\s+\d+/);
       if (!match) continue;
 
-      const id = match[1]!;
+      const labels = MediamtxCollector.parseLabels(match[1]!);
+      const id = labels["id"];
+      const path = labels["path"];
+      const state = labels["state"];
+      if (!id || !path || !state) continue;
       if (dests.has(id)) continue;
 
       dests.set(id, {
         id,
-        path: match[2]!,
-        protocol: match[3]!,
-        remoteAddr: match[4] ? match[4] : null,
-        state: match[5]!,
+        path,
+        protocol: labels["type"] ?? labels["protocol"] ?? "",
+        state,
       });
     }
 
@@ -271,13 +403,75 @@ export class MediamtxCollector {
   private buildForwardMap(dests: ForwardDest[]): Map<string, string> {
     const map = new Map<string, string>();
     for (const dest of dests) {
-      // Only actively-forwarding destinations expose a real remoteAddr; idle ones either lack
-      // the label (no live socket yet) or hold it with state="idle", and must not correlate.
-      if (dest.state !== "idle" && dest.remoteAddr) {
-        map.set(dest.remoteAddr, dest.path);
+      // Only actively-forwarding destinations correlate; idle ones must not. The peer
+      // comes from the forward-dests/get cache (see ensureForwards), never from labels.
+      if (dest.state === "idle") continue;
+      const remoteAddr = this.forwardCache.get(`${dest.path}:${dest.id}`);
+      if (remoteAddr) {
+        map.set(remoteAddr, dest.path);
       }
     }
     return map;
+  }
+
+  // Fetch forward details for every active destination missing from the cache. A
+  // reconnect mints a fresh mediamtx id, so it arrives as a cache miss and is
+  // fetched; ids that vanished from /metrics are evicted on the same pass. At most
+  // one fetch per id; a failed fetch simply retries next tick and never fails
+  // collect().
+  private async ensureForwards(dests: ForwardDest[]): Promise<void> {
+    const live = new Set<string>();
+    const tasks: Array<Promise<void>> = [];
+
+    for (const dest of dests) {
+      if (dest.state === "idle") continue;
+      const key = `${dest.path}:${dest.id}`;
+      live.add(key);
+      if (this.forwardCache.has(key) || this.pendingForward.has(key)) continue;
+
+      const task = this.fetchForward(dest.path, dest.id, key);
+      this.pendingForward.set(key, task);
+      tasks.push(
+        task.finally(() => {
+          this.pendingForward.delete(key);
+        }),
+      );
+    }
+
+    for (const key of this.forwardCache.keys()) {
+      if (!live.has(key)) this.forwardCache.delete(key);
+    }
+
+    await Promise.all(tasks);
+  }
+
+  private async fetchForward(path: string, id: string, key: string): Promise<void> {
+    const result = await this.resolveForward(path, id);
+    if (!result.ok) return;
+    try {
+      const parsed = JSON.parse(result.text) as ForwardGetResponse;
+      const remoteAddr = parsed.typeSpecific?.remoteAddr;
+      this.forwardCache.set(key, typeof remoteAddr === "string" && remoteAddr ? remoteAddr : null);
+    } catch {
+      // Malformed body: leave uncached so the next tick retries.
+    }
+  }
+
+  private async resolveForward(path: string, id: string): Promise<FetchResult> {
+    if (this.forwardFetcher) return this.forwardFetcher(path, id);
+    if (this.useMockData) {
+      const text = this.mockForwards[`${path}:${id}`];
+      return text === undefined ? { ok: false, text: "" } : { ok: true, text };
+    }
+    try {
+      const response = await fetch(
+        `${this.controlBase}/v3/paths/forward-dests/get?path=${encodeURIComponent(path)}&id=${encodeURIComponent(id)}`,
+      );
+      if (!response.ok) return { ok: false, text: "" };
+      return { ok: true, text: await response.text() };
+    } catch {
+      return { ok: false, text: "" };
+    }
   }
 
   // Parse the rtmp_conns metrics section into per-connection identity records. Like the SRT
@@ -287,21 +481,23 @@ export class MediamtxCollector {
     const conns = new Map<string, RtmpConn>();
 
     for (const line of output.split("\n")) {
-      // remoteAddr is always present on live connections but keep it optional to mirror the
-      // forward_dests shape (an idle/tearing-down conn could shed the label).
-      const match = line.match(
-        /^rtmp_conns\{id="([^"]+)",path="([^"]+)"(?:,remoteAddr="([^"]*)")?,state="([^"]+)"\}\s+\d+/,
-      );
+      const match = line.match(/^rtmp_conns\{([^}]*)\}\s+\d+/);
       if (!match) continue;
 
-      const id = match[1]!;
+      const labels = MediamtxCollector.parseLabels(match[1]!);
+      const id = labels["id"];
+      const path = labels["path"];
+      const state = labels["state"];
+      if (!id || !path || !state) continue;
       if (conns.has(id)) continue;
 
       conns.set(id, {
         id,
-        path: match[2]!,
-        remoteAddr: match[3] ? match[3] : null,
-        state: match[4]!,
+        path,
+        // remoteAddr is deprecated upstream; keep it optional like the forward_dests
+        // shape (an idle/tearing-down conn could shed the label).
+        remoteAddr: labels["remoteAddr"] ? labels["remoteAddr"]! : null,
+        state,
       });
     }
 
@@ -322,6 +518,133 @@ export class MediamtxCollector {
     return map;
   }
 
+  // A republish mints a fresh publish-connection id on the same path while the
+  // path itself never leaves /metrics, so neither eviction notices. The new
+  // session gets a new availableTime: drop the cached details so the next
+  // ensurePaths refetches instead of serving the previous session's.
+  private trackPublishConnections(raw: RawSrtMetric[], rtmpConns: RtmpConn[]): void {
+    const seen = new Set<string>();
+    const publishers: Array<{ path: string; id: string }> = [];
+    for (const conn of raw) {
+      if (conn.state === "publish") publishers.push(conn);
+    }
+    for (const conn of rtmpConns) {
+      if (conn.state === "publish") publishers.push(conn);
+    }
+    for (const { path, id } of publishers) {
+      seen.add(path);
+      if (this.pathPublishConn.get(path) !== id) {
+        this.pathPublishConn.set(path, id);
+        this.pathCache.delete(path);
+        this.readersCache.delete(path);
+        this.startedAtCache.delete(path);
+      }
+    }
+    for (const path of [...this.pathPublishConn.keys()]) {
+      if (!seen.has(path)) this.pathPublishConn.delete(path);
+    }
+  }
+
+  // Drop per-path details for paths gone from /metrics so a returning path
+  // refetches fresh tracks and a fresh availableTime. Names cached empty (unknown
+  // paths, failed fetches) are left alone: evicting them would bypass the
+  // refetch throttle and churn a GET every tick.
+  private evictDeadPaths(active: Set<string>): void {
+    for (const name of [...this.pathCache.keys()]) {
+      if (active.has(name)) continue;
+      if (
+        this.pathCache.get(name)!.length === 0 &&
+        !this.readersCache.has(name) &&
+        !this.startedAtCache.has(name)
+      ) {
+        continue;
+      }
+      this.pathCache.delete(name);
+      this.readersCache.delete(name);
+      this.startedAtCache.delete(name);
+    }
+  }
+
+  private async ensurePath(name: string): Promise<void> {
+    const cached = this.pathCache.get(name);
+    // A name cached with tracks never refetches on its own; a name cached empty
+    // refetches only when the throttle window is open (self-heal for the first
+    // fetch racing the publisher). Failures cache empty and retry next window.
+    if (cached !== undefined && (cached.length > 0 || !this.emptyRefetchOpen())) return;
+
+    // Coalesce concurrent callers onto the in-flight fetch.
+    const inflight = this.pendingPath.get(name);
+    if (inflight) {
+      await inflight;
+      return;
+    }
+
+    const task = this.fetchPath(name);
+    this.pendingPath.set(name, task);
+    try {
+      await task;
+    } finally {
+      this.pendingPath.delete(name);
+    }
+  }
+
+  private emptyRefetchOpen(): boolean {
+    return this.now() - this.lastFetchAt >= this.emptyRefetchIntervalMs;
+  }
+
+  private async fetchPath(name: string): Promise<void> {
+    // Stamp at the start so the throttle counts from the last fetch attempt (success or
+    // failure): a down mediamtx retries after the window instead of every tick, and a
+    // successful pull resets the clock for the next empty-refetch pass.
+    this.lastFetchAt = this.now();
+    const result = await this.resolvePath(name);
+    if (!result.ok) {
+      this.pathCache.set(name, []);
+      return;
+    }
+
+    let parsed: PathGetResponse;
+    try {
+      parsed = JSON.parse(result.text) as PathGetResponse;
+    } catch {
+      this.pathCache.set(name, []);
+      return;
+    }
+
+    const tracks: Track[] = [];
+    for (const raw of parsed.tracks2 ?? []) {
+      if (!raw || !raw.codec) continue;
+      tracks.push({ codec: raw.codec, codecProps: raw.codecProps });
+    }
+    this.pathCache.set(name, tracks);
+    if (Array.isArray(parsed.readers)) {
+      this.readersCache.set(name, parsed.readers.length);
+    } else {
+      this.readersCache.delete(name);
+    }
+    const startedAt = MediamtxCollector.parseTime(parsed.availableTime ?? parsed.readyTime);
+    if (startedAt !== null) {
+      this.startedAtCache.set(name, startedAt);
+    } else {
+      this.startedAtCache.delete(name);
+    }
+  }
+
+  private async resolvePath(name: string): Promise<FetchResult> {
+    if (this.pathFetcher) return this.pathFetcher(name);
+    if (this.useMockData) {
+      const text = this.mockPaths[name];
+      return text === undefined ? { ok: false, text: "" } : { ok: true, text };
+    }
+    try {
+      const response = await fetch(`${this.controlBase}/v3/paths/get/${encodeURIComponent(name)}`);
+      if (!response.ok) return { ok: false, text: "" };
+      return { ok: true, text: await response.text() };
+    } catch {
+      return { ok: false, text: "" };
+    }
+  }
+
   private async getMetricsResult(): Promise<CommandExecutionResult> {
     if (this.useMockData && this.mockOutputs.length > 0) {
       const mockOutput = this.getNextMockOutput();
@@ -336,6 +659,18 @@ export class MediamtxCollector {
 
     this.pendingMockElapsedMs = null;
     return this.metricsFetcher();
+  }
+
+  // Connection ids are per-connection UUIDs, never reused: windows of vanished
+  // connections would otherwise accumulate forever. Live entries are untouched, so
+  // per-tick health, jitter and counter-reset detection behave exactly as before.
+  private evictDeadConnections(liveIds: string[]): void {
+    const live = new Set(liveIds);
+    for (const cache of [this.states, this.throughputSamples, this.rttSamples]) {
+      for (const id of cache.keys()) {
+        if (!live.has(id)) cache.delete(id);
+      }
+    }
   }
 
   private getNextMockOutput(): MockOutput {

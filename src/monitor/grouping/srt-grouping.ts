@@ -104,8 +104,10 @@ export class SrtGrouping {
 
     this.lastForwardMap = result.forwardMap;
     this.lastPublishMap = result.publishMap;
-    this.syncActiveStreams(result.metrics);
+    // Tracks first: start detection below reads the mediamtx availableTime the
+    // fetch brings in, so a first-sighted stream already carries the real start.
     await this.ensurePathTracks(result.metrics);
+    this.syncActiveStreams(result.metrics);
     const streams = this.buildLogicalStreams(result.metrics);
     this.streamBandwidthLog?.recordStreams(streams, Math.floor(this.now() / 1000));
 
@@ -145,8 +147,14 @@ export class SrtGrouping {
       if (!metric.stream_id) continue;
       currentStreamIds.add(metric.stream_id);
 
-      if (!this.activeStreams.has(metric.stream_id)) {
-        this.activeStreams.set(metric.stream_id, { startedAt: now });
+      // Stream start is the mediamtx availableTime whenever the path fetch brought
+      // one in, and first-sight time only as a fallback (unfetched/failed path).
+      // mediamtx stays authoritative on later ticks too: a republish mints a fresh
+      // availableTime, which the collector refetches (see trackPublishConnections).
+      const mtxStartedAt = this.collector.getStartedAt(metric.stream_id);
+      const known = this.activeStreams.get(metric.stream_id);
+      if (!known) {
+        this.activeStreams.set(metric.stream_id, { startedAt: mtxStartedAt ?? now });
         if (this.eventLog) {
           this.eventLog.push({
             timestamp: new Date(now).toISOString(),
@@ -157,6 +165,8 @@ export class SrtGrouping {
             peerIp: metric.peer_ip,
           });
         }
+      } else if (mtxStartedAt !== null) {
+        known.startedAt = mtxStartedAt;
       }
       this.lastKnownConnections.set(metric.stream_id, {
         target: metric.target,
@@ -212,9 +222,10 @@ export class SrtGrouping {
     return [...streamMap.values()];
   }
 
-  // Lazy-load mediamtx path tracks once per seen path. Triggered from collectOnce after new-stream
-  // detection so that logical streams (which carry the path as their id) can attach track info
-  // without a per-tick re-fetch of /v3/paths/list.
+  // Lazy-load mediamtx path details once per seen path. Triggered from collectOnce before
+  // new-stream detection so logical streams (which carry the path as their id) attach track
+  // info — and start detection already sees the mediamtx availableTime — without a per-tick
+  // re-fetch of /v3/paths/list.
   private async ensurePathTracks(metrics: SrtMetrics[]): Promise<void> {
     const paths = new Set<string>();
     for (const metric of metrics) {

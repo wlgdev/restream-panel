@@ -133,6 +133,7 @@ export class SsCollector {
 
     try {
       const metrics = this.parse(commandResult.stdout);
+      this.evictDeadConnections(metrics);
       await this.resolveRtmpTargets(metrics);
       return { success: true, metrics };
     } catch (error) {
@@ -337,6 +338,18 @@ export class SsCollector {
       this.lastPublishMap.get(normalizeAddr(peerAddress)) ??
       this.lastPublishMap.get(peerAddress)
     );
+  }
+
+  // Socket keys (peer_ip + local_ip) are never reused after disconnect: windows of
+  // vanished sockets would otherwise accumulate forever. Live entries are untouched,
+  // so per-tick health and speed behave exactly as before.
+  private evictDeadConnections(metrics: StreamMetrics[]): void {
+    const live = new Set(metrics.map((metric) => `${metric.peer_ip}_${metric.local_ip}`));
+    for (const cache of [this.states, this.throughputSamples]) {
+      for (const key of cache.keys()) {
+        if (!live.has(key)) cache.delete(key);
+      }
+    }
   }
 
   private calculateHealthAndSpeed(target: StreamMetrics) {

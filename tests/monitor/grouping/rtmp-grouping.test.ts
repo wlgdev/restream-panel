@@ -12,7 +12,7 @@ import {
   vk_youtube2,
   vk_youtube3,
 } from "../../../mocks/ss";
-import { srtAndForward1 } from "../../../mocks/srt";
+import { metrics1, forwardGetTest } from "../../../mocks/srt";
 import { RtmpGrouping } from "../../../src/monitor/grouping/rtmp-grouping";
 import { SrtGrouping } from "../../../src/monitor/grouping/srt-grouping";
 
@@ -432,16 +432,22 @@ describe("RtmpGrouping.collectOnce", () => {
 
   test("correlates mediamtx outbound to SRT-inbound across monitors via the forward map", async () => {
     // Real SrtGrouping driven by the custom mediamtx metrics (paths + forward + srt_conns).
+    // The ss fixture below dials 185.226.53.77:1935, so the forward stub reports that peer
+    // (the verbatim snapshot remoteAddr is asserted in srt-grouping.test.ts instead).
+    const forwardGetVk = forwardGetTest.replace("45.136.22.81:1935", "185.226.53.77:1935");
     const srtMonitor = new SrtGrouping({
       metricsFetcher: async () => ({
         success: true,
-        stdout: srtAndForward1,
+        stdout: metrics1,
         stderr: "",
       }),
+      pathInfo: {
+        forwardFetcher: async () => ({ ok: true as const, text: forwardGetVk }),
+      },
     });
     await srtMonitor.collectOnce();
 
-    // The forward section exposes the active destination's remoteAddr -> path.
+    // The forward details expose the active destination's remoteAddr -> path.
     expect(srtMonitor.getForwardMap().get("185.226.53.77:1935")).toBe("test");
     // SRT-inbound is still parsed off the same payload (path="test").
     expect(

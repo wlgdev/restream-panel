@@ -1,5 +1,21 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { srt1, srt2, srt3, srtNull, srtAndForward1, srtAndForwardNull } from "../../../mocks/srt";
+import {
+  srt1,
+  srt2,
+  srt3,
+  srtNull,
+  metrics1,
+  metricsNull,
+  pathGetTest,
+  forwardGetTest,
+} from "../../../mocks/srt";
+
+// Per-path/per-forward fixtures for payloads with active forwards: without an injected
+// fetcher the collector would attempt the real localhost control API.
+const v3Stubs = {
+  pathFetcher: async () => ({ ok: true as const, text: pathGetTest }),
+  forwardFetcher: async () => ({ ok: true as const, text: forwardGetTest }),
+};
 import { SrtGrouping } from "../../../src/monitor/grouping/srt-grouping";
 
 const extractMetric = (sample: string, metric: string, state: "publish" | "read"): number => {
@@ -151,14 +167,17 @@ srt_conns_ms_rtt{id="a9b0be6b-2fd4-4db3-8883-57fce50c14c4",path="vk",remoteAddr=
     const monitor = new SrtGrouping({
       metricsFetcher: async () => ({
         success: true,
-        stdout: srtAndForward1,
+        stdout: metrics1,
         stderr: "",
       }),
+      pathInfo: v3Stubs,
     });
 
     await monitor.collectOnce();
 
-    expect(monitor.getForwardMap().get("185.226.53.77:1935")).toBe("test");
+    // New mediamtx omits remoteAddr from forward_dests in /metrics (even while
+    // forwarding); the peer arrives via forward-dests/get instead.
+    expect(monitor.getForwardMap().get("45.136.22.81:1935")).toBe("test");
   });
 
   test("exposes active RTMP publishers remoteAddr -> path via getPublishMap", async () => {
@@ -189,9 +208,10 @@ srt_conns 0
     const monitor = new SrtGrouping({
       metricsFetcher: async () => ({
         success: true,
-        stdout: srtAndForward1,
+        stdout: metrics1,
         stderr: "",
       }),
+      pathInfo: v3Stubs,
     });
 
     const snapshot = await monitor.collectOnce();
@@ -200,7 +220,7 @@ srt_conns 0
     const inbound = snapshot.data.find((item) => item.target === "INBOUND");
     expect(inbound).toBeDefined();
     expect(inbound?.stream_id).toBe("test");
-    expect(inbound?.peer_ip).toBe("[::1]:50763");
+    expect(inbound?.peer_ip).toBe("127.0.0.1:50699");
 
     // The path matches an SRTLA group, so the inbound SRT connection is flagged SRTLA (an
     // inbound-only SRT variant) rather than plain SRT. Forward data does not leak in.
@@ -218,7 +238,8 @@ srt_conns 0
     expect(plainSnapshot.data.find((item) => item.target === "INBOUND")?.protocol).toBe("SRT");
 
     const srtla = new SrtGrouping({
-      metricsFetcher: async () => ({ success: true, stdout: srtAndForward1, stderr: "" }),
+      metricsFetcher: async () => ({ success: true, stdout: metrics1, stderr: "" }),
+      pathInfo: v3Stubs,
     });
     const srtlaSnapshot = await srtla.collectOnce();
     expect(srtlaSnapshot.data.find((item) => item.target === "INBOUND")?.protocol).toBe("SRTLA");
@@ -247,19 +268,88 @@ srtla_groups{id="grp",path="test"} 1
   });
 
   test("keeps the forward map empty when the only forward destination is idle", async () => {
+    let forwardCalls = 0;
     const monitor = new SrtGrouping({
       metricsFetcher: async () => ({
         success: true,
-        stdout: srtAndForwardNull,
+        stdout: metricsNull,
         stderr: "",
       }),
+      pathInfo: {
+        forwardFetcher: async () => {
+          forwardCalls += 1;
+          return { ok: true as const, text: forwardGetTest };
+        },
+      },
     });
 
     await monitor.collectOnce();
 
-    // state="idle" with no remoteAddr must not correlate to anything.
+    // state="idle" must not correlate to anything — and must not even fetch details.
     expect(monitor.getForwardMap().size).toBe(0);
+    expect(forwardCalls).toBe(0);
     expect(monitor.getSnapshot().data).toHaveLength(0);
+  });
+
+  test("takes stream start from the mediamtx availableTime, not first-sight time", async () => {
+    const monitor = new SrtGrouping({
+      metricsFetcher: async () => ({
+        success: true,
+        stdout: metrics1,
+        stderr: "",
+      }),
+      pathInfo: v3Stubs,
+    });
+
+    const snapshot = await monitor.collectOnce();
+
+    expect(snapshot.streams).toHaveLength(1);
+    expect(snapshot.streams[0]?.startedAt).toBe(Date.parse("2026-09-06T07:59:32.4044976+03:00"));
+  });
+
+  test("falls back to first-sight time when path details are unavailable", async () => {
+    const monitor = new SrtGrouping({
+      metricsFetcher: async () => ({
+        success: true,
+        stdout: metrics1,
+        stderr: "",
+      }),
+    });
+
+    const snapshot = await monitor.collectOnce();
+
+    // No pathInfo: the localhost control-API fetch fails, so the mocked clock
+    // (starting at 1_000_000) is the only source — never the 2026 fixture epoch.
+    expect(snapshot.streams).toHaveLength(1);
+    expect(snapshot.streams[0]?.startedAt).toBeLessThan(10_000_000);
+  });
+
+  test("follows a republish to its fresh availableTime", async () => {
+    const republished = metrics1.replaceAll(
+      "33706734-a2b0-490c-85a9-22c727e29a25",
+      "aaaaaaaa-1111-2222-3333-444444444444",
+    );
+    let current = metrics1;
+    const bodies = [
+      pathGetTest,
+      pathGetTest.replaceAll("2026-09-06T07:59:32.4044976+03:00", "2026-09-06T08:05:00.0000000+03:00"),
+    ];
+    let i = 0;
+    const monitor = new SrtGrouping({
+      metricsFetcher: async () => ({ success: true, stdout: current, stderr: "" }),
+      pathInfo: {
+        pathFetcher: async () => ({ ok: true as const, text: bodies[Math.min(i++, bodies.length - 1)]! }),
+        forwardFetcher: async () => ({ ok: true as const, text: forwardGetTest }),
+      },
+    });
+
+    const tick1 = await monitor.collectOnce();
+    expect(tick1.streams[0]?.startedAt).toBe(Date.parse("2026-09-06T07:59:32.4044976+03:00"));
+
+    // Same path, fresh publish connection, fresh availableTime — no metrics gap.
+    current = republished;
+    const tick2 = await monitor.collectOnce();
+    expect(tick2.streams[0]?.startedAt).toBe(Date.parse("2026-09-06T08:05:00.0000000+03:00"));
   });
 
   test("default metrics fetcher targets /metrics with no query string", async () => {
