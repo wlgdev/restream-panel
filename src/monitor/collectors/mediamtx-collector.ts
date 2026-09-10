@@ -182,7 +182,7 @@ export class MediamtxCollector {
   private readonly pathPublishConn = new Map<string, string>();
   // Forward remoteAddr by "path:id" from forward-dests/get. Keyed by the mediamtx
   // forward id so a reconnect (new id) refetches instead of reusing a stale peer.
-  private readonly forwardCache = new Map<string, string | null>();
+  private readonly forwardCache = new Map<string, string>();
   private readonly pendingPath = new Map<string, Promise<void>>();
   private readonly pendingForward = new Map<string, Promise<void>>();
   private lastFetchAt = 0;
@@ -451,7 +451,9 @@ export class MediamtxCollector {
     try {
       const parsed = JSON.parse(result.text) as ForwardGetResponse;
       const remoteAddr = parsed.typeSpecific?.remoteAddr;
-      this.forwardCache.set(key, typeof remoteAddr === "string" && remoteAddr ? remoteAddr : null);
+      // ponytail: no addr yet (connecting forward) stays uncached so the next tick retries.
+      if (typeof remoteAddr !== "string" || !remoteAddr) return;
+      this.forwardCache.set(key, remoteAddr);
     } catch {
       // Malformed body: leave uncached so the next tick retries.
     }

@@ -49,6 +49,32 @@ describe("MediamtxCollector", () => {
     expect(tick3.forwardMap.has("10.0.0.1:1935")).toBe(false);
   });
 
+  test("retries a forward id that first reports no remoteAddr (connecting state)", async () => {
+    let calls = 0;
+    const collector = new MediamtxCollector({
+      metricsFetcher: async () => ({ success: true, stdout: metricsWithForward("fwd-A"), stderr: "" }),
+      pathInfo: {
+        forwardFetcher: async () => {
+          calls += 1;
+          // First tick: forward connecting, socket not up yet — no remoteAddr.
+          // Second tick: established, addr present. Must heal without restart.
+          return calls === 1
+            ? { ok: true, text: `{"typeSpecific":{}}` }
+            : { ok: true, text: `{"typeSpecific":{"remoteAddr":"10.0.0.1:1935"}}` };
+        },
+      },
+    });
+
+    const tick1 = await collector.collect();
+    if (!tick1.success) throw new Error("collect failed");
+    expect(tick1.forwardMap.size).toBe(0);
+
+    const tick2 = await collector.collect();
+    if (!tick2.success) throw new Error("collect failed");
+    expect(calls).toBe(2);
+    expect(tick2.forwardMap.get("10.0.0.1:1935")).toBe("test");
+  });
+
   test("leaves the forward map empty when forward details fail, without failing collect", async () => {
     const collector = new MediamtxCollector({
       metricsFetcher: async () => ({ success: true, stdout: metricsWithForward("fwd-A"), stderr: "" }),
