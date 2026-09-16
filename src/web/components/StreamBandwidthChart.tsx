@@ -1,12 +1,10 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import uPlot from "uplot";
-import type { StreamHealthItem } from "../types";
+import type { ConnectionItem } from "../types";
+import type { BandwidthPoint } from "../../core/types";
+import { formatBitrate, targetColor, targetLabel } from "../lib/format";
 
-export interface BandwidthPoint {
-  time: number;
-  inboundBps: number | null;
-  outbounds: Record<string, number>;
-}
+export type { BandwidthPoint };
 
 export interface StreamBandwidthSeriesMeta {
   key: string;
@@ -18,59 +16,8 @@ export interface StreamBandwidthSeriesMeta {
 interface Props {
   streamId: string;
   history: BandwidthPoint[];
-  inbound: StreamHealthItem | null;
-  outbound: StreamHealthItem[];
-}
-
-function getTargetColor(target: string): string {
-  switch (target.toUpperCase()) {
-    case "INBOUND":
-      return "#38bdf8";
-    case "TWITCH":
-      return "#c084fc";
-    case "VK":
-      return "#60a5fa";
-    case "YOUTUBE":
-      return "#f87171";
-    case "OUTBOUND":
-      return "#00ff88";
-    case "UNKNOWN":
-    default:
-      return "#fbbf24";
-  }
-}
-
-function targetLabel(target: string): string {
-  switch (target.toUpperCase()) {
-    case "INBOUND":
-      return "Inbound";
-    case "TWITCH":
-      return "Twitch";
-    case "VK":
-      return "VK";
-    case "YOUTUBE":
-      return "YouTube";
-    case "OUTBOUND":
-      return "Outbound";
-    case "UNKNOWN":
-      return "Unknown";
-    default:
-      return target;
-  }
-}
-
-function formatBitrate(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value) || value <= 0) {
-    return "0 kbps";
-  }
-  const units = ["kbps", "Mbps", "Gbps"];
-  let rate = value / 1000;
-  let index = 0;
-  while (rate >= 1000 && index < units.length - 1) {
-    rate /= 1000;
-    index += 1;
-  }
-  return `${rate >= 100 ? rate.toFixed(0) : rate.toFixed(1)} ${units[index]}`;
+  inbound: ConnectionItem | null;
+  outbound: ConnectionItem[];
 }
 
 function formatTime(timestampSec: number): string {
@@ -86,6 +33,7 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
   const plotRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const uplotInstance = useRef<uPlot | null>(null);
+  const appliedKeysRef = useRef<string[]>([]);
 
   const [windowSec, setWindowSec] = useState<number | "all">(600);
   const [isLive, setIsLive] = useState(true);
@@ -105,7 +53,7 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
         key: "inbound",
         label: `Inbound${peerLabel}`,
         target: "INBOUND",
-        color: getTargetColor("INBOUND"),
+        color: targetColor("INBOUND"),
       });
       keysSeen.add("inbound");
     }
@@ -120,7 +68,7 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
           key,
           label: `${targetLabel(item.target)}${peerLabel}`,
           target: item.target,
-          color: getTargetColor(item.target),
+          color: targetColor(item.target),
         });
       }
     }
@@ -137,7 +85,7 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
             key,
             label: `${targetLabel(target)}${peerLabel}`,
             target,
-            color: getTargetColor(target),
+            color: targetColor(target),
           });
         }
       }
@@ -181,7 +129,7 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
     }
 
     const width = containerRef.current.clientWidth || 800;
-    const height = 180;
+    const height = 220;
 
     const seriesConfig: uPlot.Series[] = [
       {
@@ -248,7 +196,7 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
           },
           font: "10px JetBrains Mono, monospace",
           values: (u, splits) => splits.map((v) => formatBitrate(v)),
-          size: 65,
+          size: 80,
         },
       ],
       legend: {
@@ -333,6 +281,7 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
 
     const inst = new uPlot(opts, chartData, plotRef.current);
     uplotInstance.current = inst;
+    appliedKeysRef.current = seriesMetaList.map((s) => s.key);
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -354,7 +303,43 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
         uplotInstance.current = null;
       }
     };
-  }, [seriesMetaList.map((s) => s.key).join(","), streamId]);
+  }, [streamId]);
+
+  // Series join/leave without destroying the instance (keeps zoom + live-follow).
+  // ponytail: append-only — seriesMetaList order is stable (inbound, snapshot
+  // outbound order, history extras), so new keys always land at the end and the
+  // positional setData arrays stay aligned with uPlot series order.
+  useEffect(() => {
+    const inst = uplotInstance.current;
+    if (!inst) return;
+    const nextKeys = seriesMetaList.map((s) => s.key);
+    const applied = appliedKeysRef.current;
+    if (applied.join(",") === nextKeys.join(",")) return;
+
+    const removeIdx: number[] = [];
+    applied.forEach((key, i) => {
+      if (!nextKeys.includes(key)) removeIdx.push(i + 1); // series[0] is x
+    });
+    removeIdx
+      .sort((a, b) => b - a)
+      .forEach((idx) => inst.delSeries(idx));
+
+    const metaByKey = new Map(seriesMetaList.map((s) => [s.key, s]));
+    for (const key of nextKeys) {
+      if (!applied.includes(key)) {
+        const meta = metaByKey.get(key)!;
+        inst.addSeries({
+          label: meta.label,
+          stroke: meta.color,
+          width: 2,
+          fill: `${meta.color}15`,
+          points: { show: false },
+          spanGaps: true,
+        });
+      }
+    }
+    appliedKeysRef.current = nextKeys;
+  }, [seriesMetaList]);
 
   useEffect(() => {
     const inst = uplotInstance.current;
@@ -418,6 +403,15 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
   return (
     <div className="stream-chart-card" ref={containerRef}>
       <div className="stream-chart-header">
+        <div className="stream-chart-legend">
+          <span className="stream-chart-eyebrow">Bandwidth</span>
+          {seriesMetaList.map((meta) => (
+            <span key={meta.key} className="stream-chart-legend-item">
+              <span className="stream-chart-legend-dot" style={{ backgroundColor: meta.color }} />
+              <span className="stream-chart-legend-label">{meta.label}</span>
+            </span>
+          ))}
+        </div>
         <div className="stream-chart-controls">
 
           <div className="chart-btn-group">

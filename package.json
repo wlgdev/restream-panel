@@ -3,10 +3,12 @@
   "module": "src/main.ts",
   "type": "module",
   "private": true,
-  "version": "0.2.11",
+  "version": "0.3.5",
   "scripts": {
     "dev": "bun run --hot src/main.ts",
+    "dev:mock": "MOCK=1 bun run --hot src/main.ts",
     "start": "bun run src/main.ts",
+    "start:mock": "MOCK=1 bun run src/main.ts",
     "build:windows": "bun run scripts/build.ts --target=windows",
     "build:linux": "bun run scripts/build.ts --target=linux",
     "build:frontend": "bun build src/web/main.tsx --outdir public --minify",
@@ -23,9 +25,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@elysiajs/html": "^1.4.0",
-    "@elysiajs/static": "^1.4.7",
-    "elysia": "^1.4.25",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "uplot": "^1.6.32"

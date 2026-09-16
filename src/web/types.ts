@@ -1,65 +1,16 @@
-export interface PushTarget {
-  serverId: string;
-  serverName: string;
-  serverUrl: string;
-  streamKey: string;
-}
+import type {
+  BandwidthPoint,
+  EventTargetMetrics,
+  StreamEvent,
+  Track,
+  TrackCodecProps,
+} from "../core/types";
 
-export interface TrackCodecProps {
-  width?: number;
-  height?: number;
-  profile?: string;
-  level?: string;
-  sampleRate?: number;
-  channelCount?: number;
-}
+export type { BandwidthPoint, EventTargetMetrics, StreamEvent, Track, TrackCodecProps };
 
-export interface Track {
-  codec: string;
-  codecProps?: TrackCodecProps;
-}
-
-export interface Application {
-  name: string;
-  isProtected: boolean;
-  pushTargets: PushTarget[];
-}
-
-export interface Server {
-  id: string;
-  name: string;
-  url: string;
-  requiresStreamKey: boolean;
-  supportsDynamicStreamKey?: boolean;
-}
-
-export interface StreamTarget {
-  id: string;
-  name: string;
-  listenPort: number;
-  proxyPass: string;
-  obsPath: string;
-  transportLabel: string;
-  protectedLabel: string;
-  targetServerName: string;
-}
-
-export interface SystemStatus {
-  nginx: {
-    running: boolean;
-    version: string;
-  };
-  app?: {
-    ip: string;
-  };
-}
-
-export interface AlertState {
-  type: "success" | "error" | "warning";
-  message: string;
-}
-
-export interface StreamHealthItem {
+// One live connection row: an RTMP(S) socket or an SRT session. Shaped to accept
+// the monitor's StreamMetrics/SrtMetrics verbatim (extra source fields pass through).
+export interface ConnectionItem {
   protocol?: "RTMP" | "RTMPS" | "SRT" | "SRTLA";
   target: string;
   stream_id?: string;
@@ -88,53 +39,35 @@ export interface StreamHealthItem {
 export interface LogicalStreamItem {
   id: string;
   startedAt: number;
-  inbound: StreamHealthItem | null;
-  outbound: StreamHealthItem[];
+  inbound: ConnectionItem | null;
+  outbound: ConnectionItem[];
   tracks?: Track[];
+  readers?: number;
 }
 
-export interface HealthSnapshot {
-  success: boolean;
-  timestamp: string;
-  data: StreamHealthItem[];
+// Full monitor frame pushed over SSE every tick: logical streams already merged
+// server-side across protocols, plus connections matched to no stream.
+export interface MonitorSnapshot {
   streams: LogicalStreamItem[];
-  error?: string;
-}
-
-export interface EventTargetMetrics {
-  health: number;
-  tx_bps: number;
-  rx_bps: number;
-  bytes_sent: number;
-  bytes_received: number;
-  rtt: number;
-  send_q: number;
-  recv_q: number;
-  drop_percent: number;
-  retrans_total: number;
-}
-
-export interface StreamEvent {
-  seq: number;
-  timestamp: string;
-  type: "stream_start" | "stream_end" | "target_connected" | "target_disconnected" | "quality_degraded";
-  protocol: "RTMP" | "SRT";
-  streamId: string;
-  target: string;
-  peerIp: string | null;
-  metrics?: EventTargetMetrics;
-}
-
-export interface BandwidthPoint {
-  time: number;
-  inboundBps: number | null;
-  outbounds: Record<string, number>;
-}
-
-export interface CombinedHealthSnapshot {
-  rtmp: HealthSnapshot;
-  srt: HealthSnapshot;
+  orphans: ConnectionItem[];
   events: StreamEvent[];
   bandwidth?: Record<string, BandwidthPoint[]>;
+  errors: string[];
+  timestamp: string;
 }
 
+// What actually arrives over SSE. The first frame of a connection is a full
+// snapshot (full: true); the rest are deltas — fresh bandwidth points and
+// events to merge into local state (see lib/monitor-merge). bandwidthKeys is
+// the authoritative id list of the server-side bandwidth log; local
+// per-stream histories missing from it were evicted and must be dropped.
+export interface MonitorFrame {
+  streams: LogicalStreamItem[];
+  orphans: ConnectionItem[];
+  events: StreamEvent[];
+  bandwidth?: Record<string, BandwidthPoint[]>;
+  errors: string[];
+  timestamp: string;
+  full: boolean;
+  bandwidthKeys: string[];
+}

@@ -6,7 +6,7 @@
 </h1>
 
 <p align="center">
-   A web dashboard for managing and configuring a Restream Server.
+   Live health monitoring for a MediaMTX restream server.
 </p>
 
 <!-- TABLE OF CONTENT -->
@@ -26,8 +26,10 @@
         <li><a href="#installation">Installation & Build</a></li>
       </ul>
     </li>
-    <li><a href="#%EF%B8%8F-how-to-use">⚠️ How to use</a></li>
-    <li><a href="#%EF%B8%8F-deployment">⬆️ Deployment</a></li>
+    <li>
+      <a href="#%EF%B8%8F-how-to-use">⚠️ How to use</a></li>
+    <li>
+      <a href="#%EF%B8%8F-deployment">⬆️ Deployment</a></li>
   </ol>
 </details>
 
@@ -35,34 +37,29 @@
 
 ## 📃 Description
 
-This is a lightweight web dashboard designed to configure re-translation options for RTMP/SRT streams and monitor network connections in real-time.
+A lightweight web dashboard for real-time monitoring of RTMP/SRT streams relayed
+through [MediaMTX](https://github.com/bluenviron/mediamtx): per-connection health
+(throughput, RTT, loss/retransmits, buffers), logical streams grouped by path,
+event log and bitrate charts, streamed to the UI over SSE.
 
-The application provides a user-friendly WebUI for editing the `nginx.conf` file. It allows you to add, edit, and delete `application` blocks within the nginx RTMP module configuration to manage various restream targets (e.g., Twitch, VK Video, and other platforms).
-
-The restream server receives an incoming stream from the user and forwards it to the selected target servers. For sending streams via the RTMPS protocol, `stunnel` is used as a proxy.
+The panel is read-only: it never edits server configuration.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
 ### Built With
 
-- [Bun](https://bun.sh/)
-- [ElysiaJS](https://elysiajs.com/)
+- [Bun](https://bun.sh/) (built-in serve, routes and SSE — no backend framework)
 - [React](https://react.dev/)
 
 ## 🪧 Getting Started
 
 ### Prerequisites
 
-For development and building the project, you need:
-- [Bun](https://bun.sh/) version 1.0+
+- [Bun](https://bun.sh/) version 1.4+
+- A local or remote MediaMTX with API enabled (`/metrics`, `/v3/paths/get/*`, `/v3/paths/forward-dests/get`).
+  On Linux, `ss -itnop` is used for RTMP TCP metrics.
 
-The target restream server (where the panel will be installed) must run on **Linux x64 (Ubuntu 22 or 24)** with the following components installed:
-- `nginx`
-- `nginx rtmp module`
-- `stunnel`
-- `mediamtx`
-
-### Installation & Build
+### Installation
 
 1. Clone the repository:
    ```sh
@@ -75,25 +72,31 @@ The target restream server (where the panel will be installed) must run on **Lin
    bun install
    ```
 
-3. Run in development mode:
+3. Run against the real MediaMTX:
    ```sh
    bun run dev
    ```
 
-4. To build the frontend and backend:
+4. Run with mock fixtures (no `ss`/MediaMTX needed):
+   ```sh
+   bun run dev:mock
+   ```
+
+5. Build:
    ```sh
    bun run build:frontend
    bun run build:prod
    ```
    Platform-specific scripts are also available: `build:windows` and `build:linux`.
+   Run tests with `bun test`.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
 ## ⚠️ How to use
 
-The panel is designed to manage your `nginx.conf` file. Through the web interface, you can create new RTMP applications (`application`), specifying the target push servers and stream keys (for example, Twitch servers in Stockholm, Frankfurt, Paris, or VK servers).
-
-Note that 3 basic `application` blocks from the default Nginx template are locked and cannot be deleted or modified. They must remain in the configuration at all times.
+Open the panel (default `http://localhost:16969`), log in (`admin / restream`
+unless overridden via `--user/--password` or `RESTREAM_USER/RESTREAM_PASSWORD`)
+and watch the Monitor page: active streams, unassociated connections, event log.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -102,8 +105,8 @@ Note that 3 basic `application` blocks from the default Nginx template are locke
 Currently, there is no automated CI/CD pipeline for deployment.
 
 To deploy on a production server:
-1. Compile the Linux binary: `bun run build:linux` (make sure to build the frontend first with `bun run build:frontend`).
-2. Copy the resulting binary file (along with necessary static files, if they are not bundled within the binary) to your restream server.
-3. Run the binary manually or configure it as a background service (e.g., via systemd). Ensure that the process has read and write permissions to the Nginx configuration file (usually `/etc/nginx/nginx.conf`).
+1. Compile the Linux binary: `bun run build:linux`.
+2. Copy the resulting binary to your restream server (static assets are embedded).
+3. Run the binary manually or as a background service (e.g., via systemd).
 
 <p align="right">(<a href="#top">back to top</a>)</p>
