@@ -779,9 +779,135 @@ ESTAB             0                   0                            194.5.78.216:
     
     events = monitor.getEventsSince(2);
     expect(events).toHaveLength(2);
-    
+
     const types = events.map(e => e.type);
     expect(types).toContain("target_disconnected");
     expect(types).toContain("stream_end");
+  });
+});
+
+describe("RtmpGrouping forward reconnect without forward map", () => {
+  const infoLine = (bytesSent: number) =>
+    `         ts sack cubic wscale:7,9 rto:212 rtt:11.281/4.176 ato:40 mss:1448 pmtu:1500 rcvmss:1448 advmss:1448 cwnd:659 bytes_sent:${bytesSent} bytes_acked:45781617 bytes_received:4246 segs_out:35332 segs_in:4594 data_segs_out:35322 data_segs_in:155 send 676700293bps lastsnd:8 lastrcv:390 lastack:9 pacing_rate 1353400584bps delivery_rate 324658616bps delivered:35322 app_limited busy:39174ms unacked:1 rcv_space:14480 rcv_ssthresh:66417 minrtt:8.636 snd_wnd:1000064`;
+
+  const forwardSs = (local: string, peer: string, bytesSent: number) =>
+    `State             Recv-Q           Send-Q                             Local Address:Port                                  Peer Address:Port           Process
+ESTAB             0                256                                 ${local}                                 ${peer}            users:(("mediamtx",pid=242385,fd=13)) timer:(on,204ms,0)
+${infoLine(bytesSent)}
+`;
+
+  const buildMonitor = (now: () => number, getOutput: () => string, getMap: () => Map<string, string>) =>
+    new RtmpGrouping({
+      now,
+      commandExecutor: () => ({ success: true, stdout: getOutput(), stderr: "" }),
+      forwardMapProvider: getMap,
+      rtmpTargetResolver: { resolveTarget: async () => "VK" as const },
+    });
+
+  test("matches a forward peer rendered as IPv4-mapped IPv6 via the plain map entry", async () => {
+    let now = 1_000_000;
+    const monitor = buildMonitor(
+      () => now,
+      () => forwardSs("85.92.111.45:36714", "[::ffff:185.226.53.77]:1935", 45781628),
+      () => new Map([["185.226.53.77:1935", "vk"]]),
+    );
+
+    const snapshot = await monitor.collectOnce();
+
+    expect(snapshot.streams).toHaveLength(1);
+    expect(snapshot.streams[0]?.id).toBe("vk");
+    expect(snapshot.data[0]?.stream_id).toBe("vk");
+  });
+
+  test("re-associates a reconnected forward by retired peer when the map stays empty", async () => {
+    let now = 1_000_000;
+    let currentOutput = forwardSs("85.92.111.45:36714", "185.226.53.77:1935", 45781628);
+    let currentMap = new Map([["185.226.53.77:1935", "vk"]]);
+    const monitor = buildMonitor(() => now, () => currentOutput, () => currentMap);
+
+    const snap1 = await monitor.collectOnce();
+    expect(snap1.streams).toHaveLength(1);
+    const startedAt = snap1.streams[0]!.startedAt;
+
+    now += 5_000;
+    currentOutput = "";
+    currentMap = new Map();
+    const snap2 = await monitor.collectOnce();
+    expect(snap2.streams).toEqual([]);
+
+    now += 20_000;
+    currentOutput = forwardSs("85.92.111.45:36715", "185.226.53.77:1935", 100000);
+    const snap3 = await monitor.collectOnce();
+
+    expect(snap3.streams).toHaveLength(1);
+    expect(snap3.streams[0]?.id).toBe("vk");
+    expect(snap3.streams[0]?.startedAt).toBe(startedAt);
+    expect(snap3.streams[0]?.outbound).toHaveLength(1);
+  });
+
+  test("restores the original startedAt when the map re-correlates after a gap", async () => {
+    let now = 1_000_000;
+    let currentOutput = forwardSs("85.92.111.45:36714", "185.226.53.77:1935", 45781628);
+    let currentMap = new Map([["185.226.53.77:1935", "vk"]]);
+    const monitor = buildMonitor(() => now, () => currentOutput, () => currentMap);
+
+    const snap1 = await monitor.collectOnce();
+    const startedAt = snap1.streams[0]!.startedAt;
+
+    now += 5_000;
+    currentOutput = "";
+    currentMap = new Map();
+    await monitor.collectOnce();
+
+    now += 20_000;
+    currentOutput = forwardSs("85.92.111.45:36715", "185.226.53.77:1935", 100000);
+    currentMap = new Map([["185.226.53.77:1935", "vk"]]);
+    const snap3 = await monitor.collectOnce();
+
+    expect(snap3.streams).toHaveLength(1);
+    expect(snap3.streams[0]?.startedAt).toBe(startedAt);
+  });
+
+  test("keeps the orphan when the retired entry expired", async () => {
+    let now = 1_000_000;
+    let currentOutput = forwardSs("85.92.111.45:36714", "185.226.53.77:1935", 45781628);
+    let currentMap = new Map([["185.226.53.77:1935", "vk"]]);
+    const monitor = buildMonitor(() => now, () => currentOutput, () => currentMap);
+
+    await monitor.collectOnce();
+
+    now += 5_000;
+    currentOutput = "";
+    currentMap = new Map();
+    await monitor.collectOnce();
+
+    now += 61_000;
+    currentOutput = forwardSs("85.92.111.45:36715", "185.226.53.77:1935", 100000);
+    const snap3 = await monitor.collectOnce();
+
+    expect(snap3.streams).toEqual([]);
+    expect(snap3.data).toHaveLength(1);
+    expect(snap3.data[0]?.stream_id).toBeUndefined();
+  });
+
+  test("keeps the orphan when the peer belongs to another platform", async () => {
+    let now = 1_000_000;
+    let currentOutput = forwardSs("85.92.111.45:36714", "185.226.53.77:1935", 45781628);
+    let currentMap = new Map([["185.226.53.77:1935", "vk"]]);
+    const monitor = buildMonitor(() => now, () => currentOutput, () => currentMap);
+
+    await monitor.collectOnce();
+
+    now += 5_000;
+    currentOutput = "";
+    currentMap = new Map();
+    await monitor.collectOnce();
+
+    now += 20_000;
+    currentOutput = forwardSs("85.92.111.45:36715", "203.0.113.50:1935", 100000);
+    const snap3 = await monitor.collectOnce();
+
+    expect(snap3.streams).toEqual([]);
+    expect(snap3.data[0]?.stream_id).toBeUndefined();
   });
 });

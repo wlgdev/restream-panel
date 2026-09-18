@@ -511,8 +511,8 @@ export class MediamtxCollector {
     for (const conn of conns) {
       // Only publish (inbound) connections identify a stream source; read conns describe
       // consumers and must not classify a socket as INBOUND. Loopback remotes are internal
-      // relays (e.g. nginx fronting mediamtx): their publisher socket belongs to another
-      // process and is classified by StreamMonitor's own inbound branch, never by correlation.
+      // relays (their publisher socket belongs to another local process) and are classified
+      // by StreamMonitor's own inbound branch, never by correlation.
       if (conn.state === "publish" && conn.remoteAddr && !isLoopbackRemote(conn.remoteAddr)) {
         map.set(conn.remoteAddr, conn.path);
       }

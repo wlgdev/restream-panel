@@ -2,7 +2,7 @@ import type { RtmpTargetResolver } from "../collectors/rtmp-target-resolver";
 import { StreamEventLog } from "../event-log";
 import type { StreamBandwidthLog } from "../bandwidth-log";
 import { SsCollector, type StreamMetrics } from "../collectors/ss-collector";
-import { isMonitoredInboundAddress } from "../net-addr";
+import { canonicalAddr, isMonitoredInboundAddress } from "../net-addr";
 import type { LogicalStream, TrackSource } from "../types";
 
 export interface RtmpSnapshot {
@@ -40,12 +40,20 @@ interface ActiveStreamState {
   loggedStart?: boolean;
 }
 
+interface RetiredStreamState {
+  startedAt: number;
+  retiredAt: number;
+  peerIp: string | null;
+  loggedStart: boolean;
+}
+
 // RTMP grouping over SsCollector: associates sockets to logical streams, filters
 // scanner noise and emits RTMP stream events. Owned by MonitorManager, which wires
 // the mediamtx forward/publish maps in via the providers. TCP fetch/parse/health
 // live in the collector.
 export class RtmpGrouping {
   private static readonly ASSOCIATION_WINDOW_MS = 10_000;
+  private static readonly RETIRED_TTL_MS = 60_000;
   private static readonly INBOUND_CONFIRM_MIN_BYTES = 4096;
   private static readonly INBOUND_CONFIRM_MIN_AGE_WINDOW_MULTIPLIER = 1.5;
   private static readonly INBOUND_CONFIRM_MIN_RX_BPS = 16_000;
@@ -70,6 +78,8 @@ export class RtmpGrouping {
   private readonly streamBandwidthLog?: StreamBandwidthLog;
   private readonly tracks?: TrackSource;
   private readonly lastKnownConnections = new Map<string, { target: string; streamId: string; peerIp: string | null; loggedStart?: boolean }>();
+  private readonly retiredStreams = new Map<string, RetiredStreamState>();
+  private readonly streamLastPeer = new Map<string, string | null>();
 
   public constructor(options: RtmpGroupingOptions = {}) {
     this.collector = new SsCollector({
@@ -167,6 +177,12 @@ export class RtmpGrouping {
     const now = this.now();
     const currentKeys = new Set<string>();
 
+    for (const [streamId, retired] of this.retiredStreams) {
+      if (now - retired.retiredAt > RtmpGrouping.RETIRED_TTL_MS) {
+        this.retiredStreams.delete(streamId);
+      }
+    }
+
     const newInbounds: { key: string; metric: StreamMetrics }[] = [];
     const newOutbounds: { key: string; metric: StreamMetrics }[] = [];
 
@@ -178,11 +194,23 @@ export class RtmpGrouping {
         // A path id on an INBOUND metric (publisher correlated via the mediamtx publish map)
         // starts unconfirmed like a synthetic stream-N inbound, so stream_start still fires
         // once payload is confirmed below. Outbound-labeled ids keep pre-started semantics.
-        this.activeStreams.set(metric.stream_id, {
-          startedAt: now,
-          inboundKey: "",
-          loggedStart: metric.target !== "INBOUND",
-        });
+        // A recently retired id is restored with its original startedAt so uptime survives
+        // a forward/publisher reconnect that the mediamtx maps re-correlate a tick later.
+        const retired = this.retiredStreams.get(metric.stream_id);
+        if (retired) {
+          this.retiredStreams.delete(metric.stream_id);
+          this.activeStreams.set(metric.stream_id, {
+            startedAt: retired.startedAt,
+            inboundKey: "",
+            loggedStart: retired.loggedStart || metric.target !== "INBOUND",
+          });
+        } else {
+          this.activeStreams.set(metric.stream_id, {
+            startedAt: now,
+            inboundKey: "",
+            loggedStart: metric.target !== "INBOUND",
+          });
+        }
       }
 
       if (metric.stream_id) {
@@ -272,6 +300,37 @@ export class RtmpGrouping {
               bestStreamId = streamId;
             }
           }
+        }
+      }
+
+      // Last resort for map-less outbounds whose stream is invisible to this grouping
+      // (SRT/SRTLA inbound never lands in activeStreams, so the window above cannot hit
+      // a long-lived stream, and inboundKey is empty). A recently retired id with the
+      // same forward peer is almost certainly the same reconnected forward. Single
+      // candidate only: shared peers across paths stay orphans rather than mis-group.
+      if (!bestStreamId && metric.peer_ip) {
+        let singleId: string | null = null;
+        let ambiguous = false;
+        for (const [streamId, retired] of this.retiredStreams) {
+          if (!retired.loggedStart || !retired.peerIp) continue;
+          if (retired.peerIp === metric.peer_ip || canonicalAddr(retired.peerIp) === canonicalAddr(metric.peer_ip)) {
+            if (singleId === null) {
+              singleId = streamId;
+            } else {
+              ambiguous = true;
+              break;
+            }
+          }
+        }
+        if (singleId && !ambiguous) {
+          const retired = this.retiredStreams.get(singleId)!;
+          this.retiredStreams.delete(singleId);
+          this.activeStreams.set(singleId, {
+            startedAt: retired.startedAt,
+            inboundKey: "",
+            loggedStart: true,
+          });
+          bestStreamId = singleId;
         }
       }
 
@@ -370,6 +429,16 @@ export class RtmpGrouping {
         }
       }
       if (!hasActive) {
+        const lastPeer = this.streamLastPeer.get(streamId) ?? null;
+        this.streamLastPeer.delete(streamId);
+        if (streamState.loggedStart) {
+          this.retiredStreams.set(streamId, {
+            startedAt: streamState.startedAt,
+            retiredAt: now,
+            peerIp: lastPeer,
+            loggedStart: true,
+          });
+        }
         this.activeStreams.delete(streamId);
         if (streamState.loggedStart && !emittedStreamEnds.has(streamId) && streamState.inboundKey !== "") {
           const inboundLastKnown = this.lastKnownConnections.get(streamState.inboundKey);
@@ -394,6 +463,9 @@ export class RtmpGrouping {
           peerIp: metric.peer_ip,
           loggedStart: state?.loggedStart ?? false,
         });
+        if (metric.target !== "INBOUND") {
+          this.streamLastPeer.set(metric.stream_id, metric.peer_ip);
+        }
       }
     }
   }

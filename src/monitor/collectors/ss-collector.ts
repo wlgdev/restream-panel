@@ -318,10 +318,12 @@ export class SsCollector {
     // mediamtx outbound RTMP sockets carry no path of their own (mediamtx is one
     // process shared by all forwards, so cmdline cannot disambiguate them the way
     // it does for per-stream ffmpeg). Correlate them against the forward_dests
-    // remoteAddr -> path map mirrored from the mediamtx metrics. Try the bracket-stripped
-    // form first, then the raw address, so an IPv6 peer matches regardless of
-    // whether mediamtx emitted its remoteAddr with surrounding brackets.
+    // remoteAddr -> path map mirrored from the mediamtx metrics. ss renders an IPv4
+    // peer accepted on an IPv6 socket as a bracketed IPv4-mapped address
+    // ("[::ffff:1.2.3.4]:1935") while mediamtx reports the same connection as plain
+    // "1.2.3.4:1935"; canonicalAddr reconciles the two, mirroring lookupPublishPath.
     return (
+      this.lastForwardMap.get(canonicalAddr(peerAddress)) ??
       this.lastForwardMap.get(normalizeAddr(peerAddress)) ??
       this.lastForwardMap.get(peerAddress)
     );
