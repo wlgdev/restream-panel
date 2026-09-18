@@ -3,7 +3,7 @@
   "module": "src/main.ts",
   "type": "module",
   "private": true,
-  "version": "0.3.5",
+  "version": "0.3.6",
   "scripts": {
     "dev": "bun run --hot src/main.ts",
     "dev:mock": "MOCK=1 bun run --hot src/main.ts",
