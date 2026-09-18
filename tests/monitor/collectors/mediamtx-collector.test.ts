@@ -236,4 +236,120 @@ srt_conns_ms_rtt{id="${conn}",path="test",remoteAddr="127.0.0.1:5000",state="pub
     await collector.ensurePaths(["live/a"]);
     expect(collector.getTracks("live/a")?.map((t) => t.codec)).toEqual(["H264"]);
   });
+
+  test("revalidates a stable forward id when the ingest peer changes (DNS LB)", async () => {
+    // Destination slot keeps its id across reconnects; only the ingest peer changes.
+    // A write-once cache would pin the old peer forever and orphan the new socket.
+    const metrics = metricsWithForward("fwd-A");
+    let now = 1_000_000;
+    let peer = "185.226.53.80:1935";
+    const calls: string[] = [];
+    const collector = new MediamtxCollector({
+      now: () => now,
+      metricsFetcher: async () => ({ success: true, stdout: metrics, stderr: "" }),
+      pathInfo: {
+        forwardRefetchMs: 30000,
+        forwardFetcher: async (_path, id) => {
+          calls.push(id);
+          return { ok: true, text: `{"typeSpecific":{"remoteAddr":"${peer}"}}` };
+        },
+      },
+    });
+
+    const tick1 = await collector.collect();
+    if (!tick1.success) throw new Error("collect failed");
+    expect(calls).toEqual(["fwd-A"]);
+    expect(tick1.forwardMap.get("185.226.53.80:1935")).toBe("test");
+
+    // Within the TTL — no refetch even though the ingest moved on.
+    peer = "185.226.52.78:1935";
+    now += 5_000;
+    const tick2 = await collector.collect();
+    if (!tick2.success) throw new Error("collect failed");
+    expect(calls).toHaveLength(1);
+    expect(tick2.forwardMap.get("185.226.53.80:1935")).toBe("test");
+
+    // TTL elapses — refetch picks up the new ingest peer, old one drops out.
+    now += 30_000;
+    const tick3 = await collector.collect();
+    if (!tick3.success) throw new Error("collect failed");
+    expect(calls).toEqual(["fwd-A", "fwd-A"]);
+    expect(tick3.forwardMap.get("185.226.52.78:1935")).toBe("test");
+    expect(tick3.forwardMap.has("185.226.53.80:1935")).toBe(false);
+  });
+
+  test("refetches forward peers on the same tick the source republishes", async () => {
+    // SRT interrupted and resumed: new publish-conn id, same forward id, new ingest.
+    // Waiting for the TTL would orphan the redialed socket; the republish drops the
+    // path's forward peers so they refetch immediately.
+    const metricsWithSrtPublish = (conn: string) => `# Forward destinations
+forward_dests{id="fwd-A",path="test",pos="1",protocol="rtmp",state="forwarding",type="rtmp"} 1
+
+# SRT connections
+srt_conns{id="${conn}",path="test",remoteAddr="127.0.0.1:5000",state="publish"} 1
+srt_conns_ms_rtt{id="${conn}",path="test",remoteAddr="127.0.0.1:5000",state="publish"} 5
+`;
+    let current = metricsWithSrtPublish("srt-A");
+    let peer = "185.226.53.80:1935";
+    const calls: string[] = [];
+    const collector = new MediamtxCollector({
+      metricsFetcher: async () => ({ success: true, stdout: current, stderr: "" }),
+      pathInfo: {
+        forwardFetcher: async (_path, id) => {
+          calls.push(id);
+          return { ok: true, text: `{"typeSpecific":{"remoteAddr":"${peer}"}}` };
+        },
+      },
+    });
+
+    const tick1 = await collector.collect();
+    if (!tick1.success) throw new Error("collect failed");
+    expect(tick1.forwardMap.get("185.226.53.80:1935")).toBe("test");
+
+    // Source resumes with a fresh publish id and the forward redials a new ingest.
+    current = metricsWithSrtPublish("srt-B");
+    peer = "185.226.52.78:1935";
+    const tick2 = await collector.collect();
+    if (!tick2.success) throw new Error("collect failed");
+    expect(calls).toEqual(["fwd-A", "fwd-A"]);
+    expect(tick2.forwardMap.get("185.226.52.78:1935")).toBe("test");
+    expect(tick2.forwardMap.has("185.226.53.80:1935")).toBe(false);
+  });
+
+  test("leaves a shared ingest peer unmapped instead of mis-attributing it", async () => {
+    // Two paths forwarding through one platform ingest IP:port. Either path would
+    // claim both sockets, so the peer must attribute to neither.
+    const metrics = `# Forward destinations
+forward_dests{id="fwd-A",path="vk",pos="1",protocol="rtmp",state="forwarding",type="rtmp"} 1
+forward_dests{id="fwd-B",path="live",pos="1",protocol="rtmp",state="forwarding",type="rtmp"} 1
+`;
+    const collector = new MediamtxCollector({
+      metricsFetcher: async () => ({ success: true, stdout: metrics, stderr: "" }),
+      pathInfo: {
+        forwardFetcher: async () => ({ ok: true, text: `{"typeSpecific":{"remoteAddr":"185.226.53.80:1935"}}` }),
+      },
+    });
+
+    const tick = await collector.collect();
+    if (!tick.success) throw new Error("collect failed");
+    expect(tick.forwardMap.has("185.226.53.80:1935")).toBe(false);
+    expect(tick.forwardMap.size).toBe(0);
+  });
+
+  test("keeps mapping when two dests of one path share an ingest peer", async () => {
+    const metrics = `# Forward destinations
+forward_dests{id="fwd-A",path="vk",pos="1",protocol="rtmp",state="forwarding",type="rtmp"} 1
+forward_dests{id="fwd-B",path="vk",pos="2",protocol="rtmp",state="forwarding",type="rtmp"} 1
+`;
+    const collector = new MediamtxCollector({
+      metricsFetcher: async () => ({ success: true, stdout: metrics, stderr: "" }),
+      pathInfo: {
+        forwardFetcher: async () => ({ ok: true, text: `{"typeSpecific":{"remoteAddr":"185.226.53.80:1935"}}` }),
+      },
+    });
+
+    const tick = await collector.collect();
+    if (!tick.success) throw new Error("collect failed");
+    expect(tick.forwardMap.get("185.226.53.80:1935")).toBe("vk");
+  });
 });

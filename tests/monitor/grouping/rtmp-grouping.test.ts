@@ -910,4 +910,34 @@ ${infoLine(bytesSent)}
     expect(snap3.streams).toEqual([]);
     expect(snap3.data[0]?.stream_id).toBeUndefined();
   });
+
+  test("keeps the orphan when several streams are known (no cross-stream guess)", async () => {
+    let now = 1_000_000;
+    const peerA = "185.226.53.77:1935";
+    const peerB = "203.0.113.50:1935";
+    let currentOutput =
+      forwardSs("85.92.111.45:36714", peerA, 45781628) + forwardSs("85.92.111.45:36716", peerB, 1000);
+    let currentMap = new Map([
+      [peerA, "vk"],
+      [peerB, "live"],
+    ]);
+    const monitor = buildMonitor(() => now, () => currentOutput, () => currentMap);
+
+    const snap1 = await monitor.collectOnce();
+    expect(snap1.streams.map((s) => s.id).sort()).toEqual(["live", "vk"]);
+
+    now += 5_000;
+    currentOutput = "";
+    currentMap = new Map();
+    await monitor.collectOnce();
+
+    // Two retired streams: a returning socket on peerA could be either path's,
+    // so it must not rejoin vk by peer match alone.
+    now += 20_000;
+    currentOutput = forwardSs("85.92.111.45:36715", peerA, 200000);
+    const snap3 = await monitor.collectOnce();
+
+    expect(snap3.streams).toEqual([]);
+    expect(snap3.data[0]?.stream_id).toBeUndefined();
+  });
 });

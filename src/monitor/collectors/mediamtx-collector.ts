@@ -17,6 +17,12 @@ export interface PathInfoOptions {
   // Minimum time between refetches of a path cached empty (mediamtx hadn't parsed
   // `tracks2` yet on the first fetch). Defaults to 20s.
   emptyRefetchIntervalMs?: number;
+  // Maximum age of a cached forward remoteAddr before it is refetched. Forward
+  // dest ids are per-destination slots that survive reconnects, while platforms
+  // behind DNS load-balancers hand out a different ingest IP per connection —
+  // without revalidation the map sticks to the previous ingest forever and the
+  // reconnected socket stays unassociated. Defaults to 30s.
+  forwardRefetchMs?: number;
 }
 
 export interface SrtMetrics {
@@ -155,8 +161,9 @@ export interface MediamtxCollectorOptions {
 // forward details. Steady-state polling stays on /metrics; a path that becomes
 // active gets one GET /v3/paths/get/{name} for tracks/readers/stream start, and each active
 // (non-idle) forward gets one GET /v3/paths/forward-dests/get?path=&id= for its
-// remoteAddr. A forward reconnect mints a fresh mediamtx id, which arrives as a
-// cache miss and is refetched automatically; entries whose id vanished from
+// remoteAddr. A reconnect either mints a fresh mediamtx id (cache miss) or reuses
+// the destination slot with a new ingest peer (stale entry, revalidated past
+// forwardRefetchMs); entries whose id vanished from
 // /metrics are evicted on the same tick. Stateless across ticks except for the
 // rolling health windows and these small caches. Grouping, events and snapshots
 // stay in the grouping layer.
@@ -180,9 +187,14 @@ export class MediamtxCollector {
   // the same path, which is the only signal that availableTime changed while the
   // path never left /metrics.
   private readonly pathPublishConn = new Map<string, string>();
-  // Forward remoteAddr by "path:id" from forward-dests/get. Keyed by the mediamtx
-  // forward id so a reconnect (new id) refetches instead of reusing a stale peer.
-  private readonly forwardCache = new Map<string, string>();
+  // Forward remoteAddr by "path:id" from forward-dests/get, with fetch time. The id
+  // identifies a destination slot and may survive reconnects, so entries are
+  // revalidated past forwardRefetchMs: a reconnect to another ingest IP changes
+  // only remoteAddr, never the id, and a write-once cache would pin the old peer.
+  // Entries are also dropped outright when the path republishes (see
+  // trackPublishConnections): a resumed source redials its forwards, so the peers
+  // are refetched on the same tick instead of going stale until the TTL.
+  private readonly forwardCache = new Map<string, { path: string; addr: string; fetchedAt: number }>();
   private readonly pendingPath = new Map<string, Promise<void>>();
   private readonly pendingForward = new Map<string, Promise<void>>();
   private lastFetchAt = 0;
@@ -197,6 +209,7 @@ export class MediamtxCollector {
   private readonly mockPaths: Record<string, string>;
   private readonly mockForwards: Record<string, string>;
   private readonly emptyRefetchIntervalMs: number;
+  private readonly forwardRefetchMs: number;
 
   public constructor(options: MediamtxCollectorOptions = {}) {
     this.metricsFetcher = options.metricsFetcher ?? MediamtxCollector.fetchMetrics;
@@ -209,6 +222,7 @@ export class MediamtxCollector {
     this.mockPaths = options.pathInfo?.mockPaths ?? {};
     this.mockForwards = options.pathInfo?.mockForwards ?? {};
     this.emptyRefetchIntervalMs = options.pathInfo?.emptyRefetchIntervalMs ?? 20000;
+    this.forwardRefetchMs = options.pathInfo?.forwardRefetchMs ?? 30000;
   }
 
   // Make sure track info for the given paths is in the cache. A name cached with
@@ -402,24 +416,36 @@ export class MediamtxCollector {
 
   private buildForwardMap(dests: ForwardDest[]): Map<string, string> {
     const map = new Map<string, string>();
+    const ambiguous = new Set<string>();
     for (const dest of dests) {
       // Only actively-forwarding destinations correlate; idle ones must not. The peer
       // comes from the forward-dests/get cache (see ensureForwards), never from labels.
       if (dest.state === "idle") continue;
-      const remoteAddr = this.forwardCache.get(`${dest.path}:${dest.id}`);
-      if (remoteAddr) {
-        map.set(remoteAddr, dest.path);
+      const cached = this.forwardCache.get(`${dest.path}:${dest.id}`);
+      if (!cached) continue;
+      const owner = map.get(cached.addr);
+      if (owner === undefined && !ambiguous.has(cached.addr)) {
+        map.set(cached.addr, dest.path);
+      } else if (owner !== dest.path) {
+        // Same ingest peer serves forwards of different paths (a platform LB can
+        // collapse several connections onto one IP:port): the peer no longer
+        // identifies a path, so it must not attribute sockets to either of them.
+        // Same-path duplicates keep mapping — they need no disambiguation.
+        map.delete(cached.addr);
+        ambiguous.add(cached.addr);
       }
     }
     return map;
   }
 
-  // Fetch forward details for every active destination missing from the cache. A
-  // reconnect mints a fresh mediamtx id, so it arrives as a cache miss and is
-  // fetched; ids that vanished from /metrics are evicted on the same pass. At most
-  // one fetch per id; a failed fetch simply retries next tick and never fails
-  // collect().
+  // Fetch forward details for every active destination missing from the cache or
+  // cached past forwardRefetchMs. A reconnect may mint a fresh mediamtx id (cache
+  // miss) or reuse the destination slot with a new ingest peer (stale entry) —
+  // both refetch here; ids that vanished from /metrics are evicted on the same
+  // pass. At most one fetch per id; a failed fetch simply retries next tick and
+  // never fails collect().
   private async ensureForwards(dests: ForwardDest[]): Promise<void> {
+    const now = this.now();
     const live = new Set<string>();
     const tasks: Array<Promise<void>> = [];
 
@@ -427,7 +453,9 @@ export class MediamtxCollector {
       if (dest.state === "idle") continue;
       const key = `${dest.path}:${dest.id}`;
       live.add(key);
-      if (this.forwardCache.has(key) || this.pendingForward.has(key)) continue;
+      if (this.pendingForward.has(key)) continue;
+      const cached = this.forwardCache.get(key);
+      if (cached && now - cached.fetchedAt < this.forwardRefetchMs) continue;
 
       const task = this.fetchForward(dest.path, dest.id, key);
       this.pendingForward.set(key, task);
@@ -453,7 +481,7 @@ export class MediamtxCollector {
       const remoteAddr = parsed.typeSpecific?.remoteAddr;
       // ponytail: no addr yet (connecting forward) stays uncached so the next tick retries.
       if (typeof remoteAddr !== "string" || !remoteAddr) return;
-      this.forwardCache.set(key, remoteAddr);
+      this.forwardCache.set(key, { path, addr: remoteAddr, fetchedAt: this.now() });
     } catch {
       // Malformed body: leave uncached so the next tick retries.
     }
@@ -523,7 +551,11 @@ export class MediamtxCollector {
   // A republish mints a fresh publish-connection id on the same path while the
   // path itself never leaves /metrics, so neither eviction notices. The new
   // session gets a new availableTime: drop the cached details so the next
-  // ensurePaths refetches instead of serving the previous session's.
+  // ensurePaths refetches instead of serving the previous session's. The resumed
+  // source also redials its forwards (platforms hand out a new ingest peer per
+  // connection under a stable destination id): drop the path's forward peers too,
+  // so ensureForwards refetches them on this same tick instead of pinning the
+  // previous ingest until forwardRefetchMs elapses.
   private trackPublishConnections(raw: RawSrtMetric[], rtmpConns: RtmpConn[]): void {
     const seen = new Set<string>();
     const publishers: Array<{ path: string; id: string }> = [];
@@ -540,6 +572,9 @@ export class MediamtxCollector {
         this.pathCache.delete(path);
         this.readersCache.delete(path);
         this.startedAtCache.delete(path);
+        for (const [key, cached] of [...this.forwardCache.entries()]) {
+          if (cached.path === path) this.forwardCache.delete(key);
+        }
       }
     }
     for (const path of [...this.pathPublishConn.keys()]) {

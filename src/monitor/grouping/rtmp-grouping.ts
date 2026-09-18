@@ -305,32 +305,25 @@ export class RtmpGrouping {
 
       // Last resort for map-less outbounds whose stream is invisible to this grouping
       // (SRT/SRTLA inbound never lands in activeStreams, so the window above cannot hit
-      // a long-lived stream, and inboundKey is empty). A recently retired id with the
-      // same forward peer is almost certainly the same reconnected forward. Single
-      // candidate only: shared peers across paths stay orphans rather than mis-group.
-      if (!bestStreamId && metric.peer_ip) {
-        let singleId: string | null = null;
-        let ambiguous = false;
-        for (const [streamId, retired] of this.retiredStreams) {
-          if (!retired.loggedStart || !retired.peerIp) continue;
-          if (retired.peerIp === metric.peer_ip || canonicalAddr(retired.peerIp) === canonicalAddr(metric.peer_ip)) {
-            if (singleId === null) {
-              singleId = streamId;
-            } else {
-              ambiguous = true;
-              break;
-            }
-          }
-        }
-        if (singleId && !ambiguous) {
-          const retired = this.retiredStreams.get(singleId)!;
-          this.retiredStreams.delete(singleId);
-          this.activeStreams.set(singleId, {
+      // a long-lived stream, and inboundKey is empty). Only when this grouping knows
+      // exactly one stream: a recently retired id with the same forward peer is then
+      // almost certainly the same reconnected forward. With several known streams a
+      // peer match proves nothing (shared ingest peers across paths stay orphans
+      // rather than mis-group), so the orphan waits for the forward map instead.
+      if (!bestStreamId && metric.peer_ip && this.activeStreams.size === 0 && this.retiredStreams.size === 1) {
+        const [streamId, retired] = [...this.retiredStreams.entries()][0]!;
+        if (
+          retired.loggedStart &&
+          retired.peerIp &&
+          (retired.peerIp === metric.peer_ip || canonicalAddr(retired.peerIp) === canonicalAddr(metric.peer_ip))
+        ) {
+          this.retiredStreams.delete(streamId);
+          this.activeStreams.set(streamId, {
             startedAt: retired.startedAt,
             inboundKey: "",
             loggedStart: true,
           });
-          bestStreamId = singleId;
+          bestStreamId = streamId;
         }
       }
 
