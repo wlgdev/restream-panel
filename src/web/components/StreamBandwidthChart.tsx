@@ -28,6 +28,18 @@ function formatTime(timestampSec: number): string {
   return `${hh}:${mm}:${ss}`;
 }
 
+function outboundSeriesMeta(item: ConnectionItem): StreamBandwidthSeriesMeta {
+  const key = `${item.target}_${item.peer_ip || item.protocol || "dest"}`;
+  const peer = item.peer_ip || (item.protocol && item.protocol !== "RTMP" ? item.protocol : "");
+  const peerLabel = peer ? ` (${peer})` : "";
+  return {
+    key,
+    label: `${targetLabel(item.target)}${peerLabel}`,
+    target: item.target,
+    color: targetColor(item.target),
+  };
+}
+
 export function StreamBandwidthChart({ streamId, history, inbound, outbound }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<HTMLDivElement>(null);
@@ -41,6 +53,31 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
   isLiveRef.current = isLive;
   const windowSecRef = useRef(windowSec);
   windowSecRef.current = windowSec;
+
+  const activeSeriesMetaList = useMemo(() => {
+    const list: StreamBandwidthSeriesMeta[] = [];
+    const keysSeen = new Set<string>();
+
+    if (inbound) {
+      const peerLabel = inbound.peer_ip ? ` (${inbound.peer_ip})` : "";
+      list.push({
+        key: "inbound",
+        label: `Inbound${peerLabel}`,
+        target: "INBOUND",
+        color: targetColor("INBOUND"),
+      });
+      keysSeen.add("inbound");
+    }
+
+    for (const item of outbound) {
+      const meta = outboundSeriesMeta(item);
+      if (keysSeen.has(meta.key)) continue;
+      keysSeen.add(meta.key);
+      list.push(meta);
+    }
+
+    return list;
+  }, [inbound, outbound]);
 
   const seriesMetaList = useMemo(() => {
     const list: StreamBandwidthSeriesMeta[] = [];
@@ -59,17 +96,10 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
     }
 
     for (const item of outbound) {
-      const key = `${item.target}_${item.peer_ip || item.protocol || "dest"}`;
-      if (!keysSeen.has(key)) {
-        keysSeen.add(key);
-        const peer = item.peer_ip || (item.protocol && item.protocol !== "RTMP" ? item.protocol : "");
-        const peerLabel = peer ? ` (${peer})` : "";
-        list.push({
-          key,
-          label: `${targetLabel(item.target)}${peerLabel}`,
-          target: item.target,
-          color: targetColor(item.target),
-        });
+      const meta = outboundSeriesMeta(item);
+      if (!keysSeen.has(meta.key)) {
+        keysSeen.add(meta.key);
+        list.push(meta);
       }
     }
 
@@ -93,7 +123,6 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
 
     return list;
   }, [inbound, outbound, history]);
-
 
   const seriesMetaRef = useRef(seriesMetaList);
   seriesMetaRef.current = seriesMetaList;
@@ -247,7 +276,6 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
             `;
             tooltip.style.display = "block";
 
-
             const tooltipWidth = tooltip.offsetWidth || 160;
             const plotWidth = u.width;
             let left = u.cursor.left ?? 0;
@@ -320,9 +348,7 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
     applied.forEach((key, i) => {
       if (!nextKeys.includes(key)) removeIdx.push(i + 1); // series[0] is x
     });
-    removeIdx
-      .sort((a, b) => b - a)
-      .forEach((idx) => inst.delSeries(idx));
+    removeIdx.sort((a, b) => b - a).forEach((idx) => inst.delSeries(idx));
 
     const metaByKey = new Map(seriesMetaList.map((s) => [s.key, s]));
     for (const key of nextKeys) {
@@ -405,7 +431,7 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
       <div className="stream-chart-header">
         <div className="stream-chart-legend">
           <span className="stream-chart-eyebrow">Bandwidth</span>
-          {seriesMetaList.map((meta) => (
+          {activeSeriesMetaList.map((meta) => (
             <span key={meta.key} className="stream-chart-legend-item">
               <span className="stream-chart-legend-dot" style={{ backgroundColor: meta.color }} />
               <span className="stream-chart-legend-label">{meta.label}</span>
@@ -413,7 +439,6 @@ export function StreamBandwidthChart({ streamId, history, inbound, outbound }: P
           ))}
         </div>
         <div className="stream-chart-controls">
-
           <div className="chart-btn-group">
             <button
               type="button"
